@@ -6,6 +6,7 @@ Vault is a secure secret management tool implemented in Go. It provides encrypte
 
 - **Encryption & Security:**  
   Uses AES-GCM with a master key derived via Argon2id.  
+  Device fingerprinting prevents vault access even if copied to another device.  
 - **MasterKey Management:**  
   - Set up vault with a MasterKey.  
   - Change or rotate the MasterKey.
@@ -102,5 +103,7 @@ The vault also exposes HTTP endpoints:
 ## Security Considerations
 
 - Vault encrypts your secrets on disk. Ensure your master key is kept secure.
+- Vault files are bound to the device they were created on using device fingerprinting.
+- Even if a vault file is copied and the master key is known, it cannot be accessed from a different device.
 - Regularly back up your vault using the provided backup commands.
 - Audit logs are stored in the vault directory to track operations.

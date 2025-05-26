@@ -25,6 +25,7 @@ import (
 var (
 	vaultDir     = os.Getenv("VAULT_DIR")
 	defaultVault *Vault
+	fingerprint  string
 )
 
 const (
@@ -51,21 +52,33 @@ func initStorage() error {
 	return nil
 }
 
+type Persist struct {
+	Data              map[string]any `json:"data"`
+	ResetAttempts     int            `json:"resetAttempts"`
+	NormalAttempts    int            `json:"normalAttempts"`
+	BannedUntil       time.Time      `json:"bannedUntil"`
+	LockedForever     bool           `json:"lockedForever"`
+	EnableReset       bool           `json:"enableReset"`
+	ResetCode         string         `json:"resetCode"`
+	DeviceFingerprint string         `json:"deviceFingerprint"`
+}
+
 // Vault represents the secret storage with encryption, reset and rate limiting.
 type Vault struct {
-	data           map[string]any
-	masterKey      []byte
-	Salt           []byte
-	authedAt       time.Time
-	mu             sync.Mutex
-	cipherGCM      cipher.AEAD
-	nonceSize      int
-	resetAttempts  int
-	normalAttempts int
-	bannedUntil    time.Time
-	lockedForever  bool
-	EnableReset    bool
-	ResetCode      string
+	data              map[string]any
+	masterKey         []byte
+	salt              []byte
+	authedAt          time.Time
+	mu                sync.Mutex
+	cipherGCM         cipher.AEAD
+	nonceSize         int
+	resetAttempts     int
+	normalAttempts    int
+	bannedUntil       time.Time
+	lockedForever     bool
+	enableReset       bool
+	resetCode         string
+	deviceFingerprint string
 }
 
 // initCipher initializes the AES-GCM cipher with the provided password and salt.
@@ -74,7 +87,7 @@ func (v *Vault) initCipher(pw []byte, salt []byte) {
 		salt = make([]byte, saltSize)
 		rand.Read(salt)
 	}
-	v.Salt = salt
+	v.salt = salt
 	key := DeriveKey(pw, salt)
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -91,6 +104,11 @@ func (v *Vault) initCipher(pw []byte, salt []byte) {
 
 // init initializes the vault by setting up storage.
 func init() {
+	var err error
+	fingerprint, err = GetDeviceFingerPrint()
+	if err != nil {
+		log.Fatalf("failed to get device fingerprint: %v", err)
+	}
 	if err := initStorage(); err != nil {
 		log.Fatal(err)
 	}
@@ -134,6 +152,7 @@ func (v *Vault) promptMaster() error {
 		if _, err := os.Stat(FilePath()); os.IsNotExist(err) {
 			// Vault file doesn't exist; create new vault using env MasterKey.
 			v.initCipher([]byte(envKey), nil)
+			v.deviceFingerprint = fingerprint
 			if err := v.save(); err != nil {
 				return err
 			}
@@ -163,7 +182,7 @@ func (v *Vault) promptMaster() error {
 		}
 	}
 
-	if v.EnableReset && ((!v.bannedUntil.IsZero() && time.Now().Before(v.bannedUntil)) || v.lockedForever) {
+	if v.enableReset && ((!v.bannedUntil.IsZero() && time.Now().Before(v.bannedUntil)) || v.lockedForever) {
 		if err := v.forceReset(); err != nil {
 			return err
 		}
@@ -199,15 +218,15 @@ func (v *Vault) promptMaster() error {
 			}
 
 			v.initCipher(pw1, nil)
-
+			v.deviceFingerprint = fingerprint
 			fmt.Print("Enable Reset Password? (y/N): ")
 			respReader := bufio.NewReader(os.Stdin)
 			resp, _ := respReader.ReadString('\n')
 			resp = strings.TrimSpace(strings.ToLower(resp))
 			if resp == "y" {
-				v.EnableReset = true
+				v.enableReset = true
 			} else {
-				v.EnableReset = false
+				v.enableReset = false
 			}
 			if err := v.save(); err != nil {
 				return err
@@ -242,12 +261,12 @@ func (v *Vault) promptMaster() error {
 				fmt.Println("Incorrect MasterKey.")
 				v.normalAttempts++
 				if v.normalAttempts >= 3 {
-					if v.EnableReset {
-						if v.ResetCode == "" {
+					if v.enableReset {
+						if v.resetCode == "" {
 							var num int64
 							binary.Read(rand.Reader, binary.BigEndian, &num)
-							v.ResetCode = fmt.Sprintf("%06d", num%1000000)
-							sendResetEmail(v.ResetCode)
+							v.resetCode = fmt.Sprintf("%06d", num%1000000)
+							sendResetEmail(v.resetCode)
 							fmt.Println("Too many attempts. Reset code has been sent to your email.")
 						}
 						continue
@@ -276,11 +295,11 @@ func sendResetEmail(code string) {
 // forceReset forces the reset flow using a reset code.
 func (v *Vault) forceReset() error {
 
-	if v.ResetCode == "" {
+	if v.resetCode == "" {
 		var num int64
 		binary.Read(rand.Reader, binary.BigEndian, &num)
-		v.ResetCode = fmt.Sprintf("%06d", num%1000000)
-		sendResetEmail(v.ResetCode)
+		v.resetCode = fmt.Sprintf("%06d", num%1000000)
+		sendResetEmail(v.resetCode)
 		fmt.Println("Vault is banned/locked. Reset code has been sent to your email.")
 	}
 
@@ -289,7 +308,7 @@ func (v *Vault) forceReset() error {
 		resetReader := bufio.NewReader(os.Stdin)
 		input, _ := resetReader.ReadString('\n')
 		input = strings.TrimSpace(input)
-		if input != v.ResetCode {
+		if input != v.resetCode {
 			fmt.Println("Incorrect reset code.")
 			continue
 		}
@@ -312,12 +331,12 @@ func (v *Vault) forceReset() error {
 				continue
 			}
 			v.initCipher(new1, nil)
-
+			v.deviceFingerprint = fingerprint
 			v.resetAttempts = 0
 			v.normalAttempts = 0
 			v.bannedUntil = time.Time{}
 			v.lockedForever = false
-			v.ResetCode = ""
+			v.resetCode = ""
 			if err := v.save(); err != nil {
 				return err
 			}
@@ -349,15 +368,7 @@ func (v *Vault) load() error {
 		return err
 	}
 
-	var persist struct {
-		Data           map[string]any `json:"data"`
-		ResetAttempts  int            `json:"resetAttempts"`
-		NormalAttempts int            `json:"normalAttempts"`
-		BannedUntil    time.Time      `json:"bannedUntil"`
-		LockedForever  bool           `json:"lockedForever"`
-		EnableReset    bool           `json:"enableReset"`
-		ResetCode      string         `json:"resetCode"`
-	}
+	var persist Persist
 	if err := json.Unmarshal(plain, &persist); err != nil {
 		return err
 	}
@@ -367,8 +378,16 @@ func (v *Vault) load() error {
 	v.normalAttempts = persist.NormalAttempts
 	v.bannedUntil = persist.BannedUntil
 	v.lockedForever = persist.LockedForever
-	v.EnableReset = persist.EnableReset
-	v.ResetCode = persist.ResetCode
+	v.enableReset = persist.EnableReset
+	v.resetCode = persist.ResetCode
+	v.deviceFingerprint = persist.DeviceFingerprint
+
+	// If device fingerprint is present in the vault, verify it
+	if v.deviceFingerprint != "" {
+		if v.deviceFingerprint != fingerprint {
+			return fmt.Errorf("access denied: vault cannot be accessed from this device")
+		}
+	}
 	if !v.bannedUntil.IsZero() && time.Now().Before(v.bannedUntil) {
 		return fmt.Errorf("vault banned until %v", v.bannedUntil.Format(time.DateTime))
 	}
@@ -377,23 +396,15 @@ func (v *Vault) load() error {
 
 // save encrypts and saves the vault data to disk.
 func (v *Vault) save() error {
-
-	persist := struct {
-		Data           map[string]any `json:"data"`
-		ResetAttempts  int            `json:"resetAttempts"`
-		NormalAttempts int            `json:"normalAttempts"`
-		BannedUntil    time.Time      `json:"bannedUntil"`
-		LockedForever  bool           `json:"lockedForever"`
-		EnableReset    bool           `json:"enableReset"`
-		ResetCode      string         `json:"resetCode"`
-	}{
-		Data:           v.data,
-		ResetAttempts:  v.resetAttempts,
-		NormalAttempts: v.normalAttempts,
-		BannedUntil:    v.bannedUntil,
-		LockedForever:  v.lockedForever,
-		EnableReset:    v.EnableReset,
-		ResetCode:      v.ResetCode,
+	persist := Persist{
+		Data:              v.data,
+		ResetAttempts:     v.resetAttempts,
+		NormalAttempts:    v.normalAttempts,
+		BannedUntil:       v.bannedUntil,
+		LockedForever:     v.lockedForever,
+		EnableReset:       v.enableReset,
+		ResetCode:         v.resetCode,
+		DeviceFingerprint: v.deviceFingerprint,
 	}
 	plain, err := json.Marshal(persist)
 	if err != nil {
@@ -403,7 +414,7 @@ func (v *Vault) save() error {
 	_, _ = io.ReadFull(rand.Reader, nonce)
 	ciphertext := v.cipherGCM.Seal(nonce, nonce, plain, nil)
 
-	final := append(v.Salt, ciphertext...)
+	final := append(v.salt, ciphertext...)
 	enc := base64.StdEncoding.EncodeToString(final)
 	return os.WriteFile(FilePath(), []byte(enc), 0600)
 }
