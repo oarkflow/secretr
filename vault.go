@@ -39,7 +39,6 @@ const (
 	argonKeyLen       = 32
 )
 
-// ...existing initStorage changes...
 func initStorage() error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -65,20 +64,18 @@ type Vault struct {
 	mu             sync.Mutex
 	cipherGCM      cipher.AEAD
 	nonceSize      int
-	resetAttempts  int       // count for reset code failures
-	normalAttempts int       // count for normal master key failures
-	bannedUntil    time.Time // ban period end time
-	lockedForever  bool      // permanent lock flag
+	resetAttempts  int
+	normalAttempts int
+	bannedUntil    time.Time
+	lockedForever  bool
 	EnableReset    bool
 	ResetCode      string
 }
 
-// Update: use Argon2id to derive key from password and salt.
 func deriveKey(pw, salt []byte) []byte {
 	return argon2.IDKey(pw, salt, argonTime, argonMemory, argonThreads, argonKeyLen)
 }
 
-// initCipher now accepts a salt. If salt == nil, generate one.
 func (v *Vault) initCipher(pw []byte, salt []byte) {
 	if salt == nil {
 		salt = make([]byte, saltSize)
@@ -123,12 +120,11 @@ func FilePath() string {
 }
 
 func (v *Vault) promptMaster() error {
-	// If already authenticated recently, skip
+
 	if time.Since(v.authedAt) < authCacheDuration && v.cipherGCM != nil {
 		return nil
 	}
-	// Instead of immediately returning errors for ban or lock,
-	// if reset is enabled force a reset.
+
 	if v.EnableReset && ((!v.bannedUntil.IsZero() && time.Now().Before(v.bannedUntil)) || v.lockedForever) {
 		if err := v.forceReset(); err != nil {
 			return err
@@ -136,14 +132,14 @@ func (v *Vault) promptMaster() error {
 		v.authedAt = time.Now()
 		return nil
 	}
-	// For vaults without reset enabled, then enforce ban/lock restrictions.
+
 	if v.lockedForever {
 		return fmt.Errorf("vault locked permanently")
 	}
 	if !v.bannedUntil.IsZero() && time.Now().Before(v.bannedUntil) {
 		return fmt.Errorf("vault banned until %v", v.bannedUntil)
 	}
-	// New vault setup if storage file doesn't exist.
+
 	if _, err := os.Stat(FilePath()); os.IsNotExist(err) {
 		for {
 			fmt.Println("Vault database not found. Setting up a new vault.")
@@ -163,9 +159,9 @@ func (v *Vault) promptMaster() error {
 				fmt.Println("MasterKeys do not match. Try again.")
 				continue
 			}
-			// New vault so no salt is read.
+
 			v.initCipher(pw1, nil)
-			// Prompt to enable reset password feature.
+
 			fmt.Print("Enable Reset Password? (y/N): ")
 			respReader := bufio.NewReader(os.Stdin)
 			resp, _ := respReader.ReadString('\n')
@@ -182,7 +178,7 @@ func (v *Vault) promptMaster() error {
 			return nil
 		}
 	} else {
-		// Existing vault: first read salt then continue.
+
 		enc, err := os.ReadFile(FilePath())
 		if err != nil {
 			return err
@@ -195,7 +191,7 @@ func (v *Vault) promptMaster() error {
 			return fmt.Errorf("corrupt vault file")
 		}
 		salt := decoded[:saltSize]
-		// Now use salt when initializing cipher.
+
 		for {
 			fmt.Print("Enter MasterKey: ")
 			pw, err := term.ReadPassword(int(os.Stdin.Fd()))
@@ -216,7 +212,7 @@ func (v *Vault) promptMaster() error {
 							sendResetEmail(v.ResetCode)
 							fmt.Println("Too many attempts. Reset code has been sent to your email.")
 						}
-						continue // will then prompt for reset code
+						continue
 					} else {
 						v.bannedUntil = time.Now().Add(10 * time.Minute)
 						fmt.Printf("Too many attempts. Vault is banned until %v.\n", v.bannedUntil.Format(time.DateTime))
@@ -233,14 +229,13 @@ func (v *Vault) promptMaster() error {
 	}
 }
 
-// sendResetEmail simulates sending an email with the reset code
 func sendResetEmail(code string) {
-	// In a real implementation, send email to the admin/user.
+
 	fmt.Printf("Sending reset code %s to user's email...\n", code)
 }
 
 func (v *Vault) forceReset() error {
-	// If no reset code exists, generate one and send email.
+
 	if v.ResetCode == "" {
 		var num int64
 		binary.Read(rand.Reader, binary.BigEndian, &num)
@@ -248,7 +243,7 @@ func (v *Vault) forceReset() error {
 		sendResetEmail(v.ResetCode)
 		fmt.Println("Vault is banned/locked. Reset code has been sent to your email.")
 	}
-	// Loop until correct reset code is entered and new MasterKey set.
+
 	for {
 		fmt.Print("Enter reset code: ")
 		resetReader := bufio.NewReader(os.Stdin)
@@ -258,7 +253,7 @@ func (v *Vault) forceReset() error {
 			fmt.Println("Incorrect reset code.")
 			continue
 		}
-		// Reset code is correct; prompt for new MasterKey.
+
 		for {
 			fmt.Print("Enter new MasterKey: ")
 			new1, err := term.ReadPassword(int(os.Stdin.Fd()))
@@ -277,7 +272,7 @@ func (v *Vault) forceReset() error {
 				continue
 			}
 			v.initCipher(new1, nil)
-			// Reset all failure counters and clear ResetCode.
+
 			v.resetAttempts = 0
 			v.normalAttempts = 0
 			v.bannedUntil = time.Time{}
@@ -304,7 +299,7 @@ func (v *Vault) load() error {
 	if len(decoded) < saltSize+v.nonceSize {
 		return fmt.Errorf("corrupt vault file")
 	}
-	// salt is already used via v.Salt.
+
 	data := decoded[saltSize:]
 	nonce := data[:v.nonceSize]
 	ciphertext := data[v.nonceSize:]
@@ -312,7 +307,7 @@ func (v *Vault) load() error {
 	if err != nil {
 		return err
 	}
-	// Define a structure that matches the saved format.
+
 	var persist struct {
 		Data           map[string]any `json:"data"`
 		ResetAttempts  int            `json:"resetAttempts"`
@@ -325,7 +320,7 @@ func (v *Vault) load() error {
 	if err := json.Unmarshal(plain, &persist); err != nil {
 		return err
 	}
-	// Assign loaded values back to the vault.
+
 	v.data = persist.Data
 	v.resetAttempts = persist.ResetAttempts
 	v.normalAttempts = persist.NormalAttempts
@@ -339,9 +334,8 @@ func (v *Vault) load() error {
 	return nil
 }
 
-// Update save: prepend salt before nonce and ciphertext.
 func (v *Vault) save() error {
-	// Create a struct that includes both secret data and config flags.
+
 	persist := struct {
 		Data           map[string]any `json:"data"`
 		ResetAttempts  int            `json:"resetAttempts"`
@@ -366,13 +360,12 @@ func (v *Vault) save() error {
 	nonce := make([]byte, v.nonceSize)
 	_, _ = io.ReadFull(rand.Reader, nonce)
 	ciphertext := v.cipherGCM.Seal(nonce, nonce, plain, nil)
-	// Prepend salt to the ciphertext.
+
 	final := append(v.Salt, ciphertext...)
 	enc := base64.StdEncoding.EncodeToString(final)
 	return os.WriteFile(FilePath(), []byte(enc), 0600)
 }
 
-// Set stores or updates a secret
 func (v *Vault) Set(key, value string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -380,7 +373,7 @@ func (v *Vault) Set(key, value string) error {
 	if err := v.promptMaster(); err != nil {
 		return err
 	}
-	// Support dot-notation
+
 	if strings.Contains(key, ".") {
 		parts := strings.Split(key, ".")
 		base := parts[0]
@@ -418,7 +411,7 @@ func (v *Vault) Set(key, value string) error {
 		v.data[base] = node
 	} else {
 		trimmed := strings.TrimSpace(value)
-		// If value looks like JSON, try to decode it.
+
 		if strings.HasPrefix(trimmed, "{") {
 			var parsed map[string]any
 			if err := json.Unmarshal([]byte(value), &parsed); err == nil {
@@ -430,11 +423,10 @@ func (v *Vault) Set(key, value string) error {
 			v.data[key] = value
 		}
 	}
-	// audit.LogAudit("set", key, "added/updated secret", v.masterKey)
+
 	return v.save()
 }
 
-// Get retrieves a secret
 func (v *Vault) Get(key string) (string, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -486,7 +478,6 @@ func (v *Vault) Get(key string) (string, error) {
 	}
 }
 
-// Delete removes a secret
 func (v *Vault) Delete(key string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -525,11 +516,10 @@ func (v *Vault) Delete(key string) error {
 	} else {
 		delete(v.data, key)
 	}
-	// audit.LogAudit("delete", key, "removed secret", v.masterKey)
+
 	return v.save()
 }
 
-// Copy retrieves a secret and copies it to clipboard
 func (v *Vault) Copy(key string) error {
 	val, err := v.Get(key)
 	if err != nil {
@@ -538,10 +528,8 @@ func (v *Vault) Copy(key string) error {
 	return clipboard.WriteAll(val)
 }
 
-// Add functions to set secrets to OS environment variables
-
 func (v *Vault) Env(key string) error {
-	// Retrieve secret using existing Get method.
+
 	secret, err := v.Get(key)
 	if err != nil {
 		return err
@@ -579,7 +567,6 @@ func (v *Vault) initData() {
 	}
 }
 
-// Execute starts CLI and HTTP server
 func Execute() {
 	vault := New()
 	err := vault.promptMaster()
@@ -640,7 +627,7 @@ func cliLoop(vault *Vault) {
 			break
 		}
 		parts := strings.Fields(scanner.Text())
-		// If "list" command, no key required.
+
 		if len(parts) > 0 {
 			if strings.ToLower(parts[0]) == "list" {
 				keys := vault.List()
@@ -650,7 +637,7 @@ func cliLoop(vault *Vault) {
 				continue
 			}
 			if strings.ToLower(parts[0]) == "enrich" {
-				// New command to set all vault secrets as OS environment variables.
+
 				if err := vault.EnrichEnv(); err != nil {
 					fmt.Println("error:", err)
 				} else {
@@ -684,7 +671,7 @@ func cliLoop(vault *Vault) {
 				fmt.Println("error:", err)
 			}
 		case "env":
-			// New command to set a secret as an OS environment variable.
+
 			if err := vault.Env(key); err != nil {
 				fmt.Println("error:", err)
 			} else {
@@ -706,7 +693,6 @@ func cliLoop(vault *Vault) {
 	}
 }
 
-// Add a new function to list vault keys.
 func (v *Vault) List() []string {
 	v.mu.Lock()
 	defer v.mu.Unlock()

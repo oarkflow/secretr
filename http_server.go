@@ -15,12 +15,11 @@ import (
 )
 
 var (
-	rateLimit = 10 // max requests per minute
+	rateLimit = 10
 	limiter   = make(map[string]int)
 	limMu     sync.Mutex
 )
 
-// simple middleware to check for a Bearer token from VAULT_TOKEN env var.
 func authMiddleware(next http.Handler) http.Handler {
 	token := os.Getenv("VAULT_TOKEN")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +32,6 @@ func authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// simple rate limiter based on remote IP.
 func rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		limMu.Lock()
@@ -60,12 +58,12 @@ func resetRateLimiter() {
 
 func StartHTTPServer(vault *Vault) {
 	mux := http.NewServeMux()
-	// Get a secret or list keys if key is empty.
+
 	mux.HandleFunc("/vault/", func(w http.ResponseWriter, r *http.Request) {
 		key := strings.TrimPrefix(r.URL.Path, "/vault/")
 		switch r.Method {
 		case http.MethodGet:
-			if key == "" || key == "keys" { // list keys endpoint
+			if key == "" || key == "keys" {
 				keys := vault.List()
 				json.NewEncoder(w).Encode(keys)
 				return
@@ -87,7 +85,7 @@ func StartHTTPServer(vault *Vault) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
-	// Endpoints for export and import.
+
 	mux.HandleFunc("/vault/export", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
@@ -115,7 +113,7 @@ func StartHTTPServer(vault *Vault) {
 	})
 
 	handler := authMiddleware(rateLimitMiddleware(mux))
-	go resetRateLimiter() // periodically reset rate limits
+	go resetRateLimiter()
 	addr := os.Getenv("VAULT_ADDR")
 	if addr == "" {
 		addr = ":8080"
@@ -124,16 +122,16 @@ func StartHTTPServer(vault *Vault) {
 		Addr:    addr,
 		Handler: handler,
 	}
-	// If TLS certs provided then serve over TLS.
+
 	certFile := os.Getenv("VAULT_CERT")
 	keyFile := os.Getenv("VAULT_KEY")
 	if certFile != "" && keyFile != "" {
-		// no timeout
+
 		tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
 		server.TLSConfig = tlsCfg
 		log.Fatal(server.ListenAndServeTLS(certFile, keyFile))
 	} else {
 		log.Fatal(server.ListenAndServe())
 	}
-	// Shutdown handling can be added here if needed.
+
 }
