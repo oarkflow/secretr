@@ -14,7 +14,7 @@ func ExportVault(v *Vault) (string, error) {
 		Data      map[string]any `json:"data"`
 		Timestamp time.Time      `json:"timestamp"`
 	}{
-		Data:      v.data,
+		Data:      v.store.Data,
 		Timestamp: time.Now(),
 	}
 	b, err := json.MarshalIndent(export, "", "  ")
@@ -34,7 +34,7 @@ func ImportVault(v *Vault, jsonData string) error {
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	v.data = imp.Data
+	v.store.Data = imp.Data
 	return v.save()
 }
 
