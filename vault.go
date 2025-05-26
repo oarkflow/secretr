@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/smtp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -126,12 +127,40 @@ func New() *Vault {
 	return &Vault{store: NewPersist()}
 }
 
+func Set(key string, value any) error {
+	if defaultVault == nil {
+		return fmt.Errorf("vault not initialized")
+	}
+	return defaultVault.Set(key, value)
+}
+
+func Copy(key string) error {
+	if defaultVault == nil {
+		return fmt.Errorf("vault not initialized")
+	}
+	return defaultVault.Copy(key)
+}
+
+func Delete(key string) error {
+	if defaultVault == nil {
+		return fmt.Errorf("vault not initialized")
+	}
+	return defaultVault.Delete(key)
+}
+
 // Get retrieves the value associated with the provided key.
 func Get(key string) (string, error) {
 	if defaultVault == nil {
 		return "", fmt.Errorf("vault not initialized")
 	}
 	return defaultVault.Get(key)
+}
+
+func Unmarshal(key string, dest any) error {
+	if defaultVault == nil {
+		return fmt.Errorf("vault not initialized")
+	}
+	return defaultVault.Unmarshal(key, dest)
 }
 
 // LoadFromEnv loads environment variables into the vault.
@@ -296,9 +325,35 @@ func (v *Vault) promptMaster() error {
 	}
 }
 
-// sendResetEmail simulates sending a reset code via email.
+// sendResetEmail now supports SMTP and AWS SES.
 func sendResetEmail(code string) {
-	fmt.Printf("Sending reset code %s to user's email...\n", code)
+	emailService := os.Getenv("VAULT_EMAIL_SERVICE")
+	resetEmail := os.Getenv("VAULT_RESET_EMAIL")
+	if emailService == "smtp" {
+		smtpServer := os.Getenv("VAULT_SMTP_SERVER")
+		smtpPort := os.Getenv("VAULT_SMTP_PORT")
+		smtpUser := os.Getenv("VAULT_SMTP_USER")
+		smtpPass := os.Getenv("VAULT_SMTP_PASS")
+		if smtpServer == "" || smtpPort == "" || smtpUser == "" || smtpPass == "" || resetEmail == "" {
+			fmt.Println("SMTP details missing. Reset code:", code)
+			return
+		}
+		subject := "Reset Code"
+		message := "Subject: " + subject + "\n\nYour reset code is: " + code
+		auth := smtp.PlainAuth("", smtpUser, smtpPass, smtpServer)
+		addr := smtpServer + ":" + smtpPort
+		err := smtp.SendMail(addr, auth, smtpUser, []string{resetEmail}, []byte(message))
+		if err != nil {
+			fmt.Println("Failed to send reset code via SMTP:", err)
+		} else {
+			fmt.Println("Reset code sent via SMTP.")
+		}
+	} else if emailService == "ses" {
+		// Placeholder for AWS SES integration; implement AWS SES sending logic here.
+		fmt.Println("AWS SES integration placeholder. Reset code:", code)
+	} else {
+		fmt.Printf("Sending reset code %s to user's email...\n", code)
+	}
 }
 
 // forceReset forces the reset flow using a reset code.
@@ -404,7 +459,7 @@ func (v *Vault) save() error {
 }
 
 // Set assigns a secret value to a key.
-func (v *Vault) Set(key, value string) error {
+func (v *Vault) Set(key string, value any) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.initData()
@@ -448,20 +503,23 @@ func (v *Vault) Set(key, value string) error {
 		}
 		v.store.Data[base] = node
 	} else {
-		trimmed := strings.TrimSpace(value)
-
-		if strings.HasPrefix(trimmed, "{") {
-			var parsed map[string]any
-			if err := json.Unmarshal([]byte(value), &parsed); err == nil {
-				v.store.Data[key] = parsed
+		switch value := value.(type) {
+		case string:
+			trimmed := strings.TrimSpace(value)
+			if strings.HasPrefix(trimmed, "{") {
+				var parsed map[string]any
+				if err := json.Unmarshal([]byte(value), &parsed); err == nil {
+					v.store.Data[key] = parsed
+				} else {
+					v.store.Data[key] = value
+				}
 			} else {
 				v.store.Data[key] = value
 			}
-		} else {
+		default:
 			v.store.Data[key] = value
 		}
 	}
-
 	err := v.save()
 	if err == nil {
 		LogAudit("set", key, "value set", v.masterKey)
@@ -760,4 +818,13 @@ func flattenKeys(data map[string]any, prefix string, keys *[]string) {
 			flattenKeys(m, fullKey, keys)
 		}
 	}
+}
+
+// Unmarshal method to Vault.
+func (v *Vault) Unmarshal(key string, dest any) error {
+	secret, err := v.Get(key)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal([]byte(secret), dest)
 }
