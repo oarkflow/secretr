@@ -125,9 +125,42 @@ func FilePath() string {
 
 // promptMaster prompts for the MasterKey and initializes the vault accordingly.
 func (v *Vault) promptMaster() error {
-
 	if time.Since(v.authedAt) < authCacheDuration && v.cipherGCM != nil {
 		return nil
+	}
+
+	// New: Use VAULT_MASTERKEY from the environment if set.
+	if envKey := os.Getenv("VAULT_MASTERKEY"); envKey != "" {
+		if _, err := os.Stat(FilePath()); os.IsNotExist(err) {
+			// Vault file doesn't exist; create new vault using env MasterKey.
+			v.initCipher([]byte(envKey), nil)
+			if err := v.save(); err != nil {
+				return err
+			}
+			v.authedAt = time.Now()
+			return nil
+		} else {
+			// Vault file exists; retrieve its salt.
+			enc, err := os.ReadFile(FilePath())
+			if err != nil {
+				return err
+			}
+			decoded, err := base64.StdEncoding.DecodeString(string(enc))
+			if err != nil {
+				return err
+			}
+			if len(decoded) < saltSize {
+				return fmt.Errorf("corrupt vault file")
+			}
+			salt := decoded[:saltSize]
+			v.initCipher([]byte(envKey), salt)
+			if err := v.load(); err == nil {
+				v.authedAt = time.Now()
+				return nil
+			} else {
+				fmt.Println("MasterKey from VAULT_MASTERKEY is invalid.")
+			}
+		}
 	}
 
 	if v.EnableReset && ((!v.bannedUntil.IsZero() && time.Now().Before(v.bannedUntil)) || v.lockedForever) {
@@ -659,11 +692,23 @@ func cliLoop(vault *Vault) {
 		op, key := strings.ToLower(parts[0]), parts[1]
 		switch op {
 		case "set", "update":
-			fmt.Print("Enter secret: ")
-			pw, _ := term.ReadPassword(int(os.Stdin.Fd()))
-			fmt.Println()
-			if err := vault.Set(key, string(pw)); err != nil {
-				fmt.Println("error:", err)
+			// Check if key contains '=' meaning inline value provided: e.g., VAR=test
+			if strings.Contains(key, "=") {
+				splits := strings.SplitN(key, "=", 2)
+				key = splits[0]
+				value := splits[1]
+				// Warn user about insecure inline secrets.
+				fmt.Println("WARNING: Providing secrets in command line is insecure.")
+				if err := vault.Set(key, value); err != nil {
+					fmt.Println("error:", err)
+				}
+			} else {
+				fmt.Print("Enter secret: ")
+				pw, _ := term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Println()
+				if err := vault.Set(key, string(pw)); err != nil {
+					fmt.Println("error:", err)
+				}
 			}
 		case "get":
 			val, err := vault.Get(key)

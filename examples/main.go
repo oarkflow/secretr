@@ -2,14 +2,14 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/oarkflow/vault"
 )
 
 // main demonstrates how to load environment variables from the vault and retrieve secrets.
 func main() {
-	vault.LoadFromEnv()
-	fmt.Println(vault.Get("HOME"))
+	os.Setenv("VAULT_MASTERKEY", "admintest")
 	openAIKey, err := vault.Get("OPENAI_KEY")
 	if err != nil {
 		panic(err)
