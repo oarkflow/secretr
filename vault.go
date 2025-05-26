@@ -11,14 +11,12 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"golang.org/x/crypto/argon2"
 	"golang.org/x/term"
 
 	"github.com/oarkflow/clipboard"
@@ -33,10 +31,6 @@ const (
 	storageFile       = "store.vlt"
 	authCacheDuration = time.Minute
 	saltSize          = 16
-	argonTime         = 1
-	argonMemory       = 64 * 1024
-	argonThreads      = 4
-	argonKeyLen       = 32
 )
 
 func initStorage() error {
@@ -72,19 +66,21 @@ type Vault struct {
 	ResetCode      string
 }
 
-func deriveKey(pw, salt []byte) []byte {
-	return argon2.IDKey(pw, salt, argonTime, argonMemory, argonThreads, argonKeyLen)
-}
-
 func (v *Vault) initCipher(pw []byte, salt []byte) {
 	if salt == nil {
 		salt = make([]byte, saltSize)
 		rand.Read(salt)
 	}
 	v.Salt = salt
-	key := deriveKey(pw, salt)
-	block, _ := aes.NewCipher(key)
-	gcm, _ := cipher.NewGCM(block)
+	key := DeriveKey(pw, salt)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		log.Fatalf("failed to create cipher: %v", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		log.Fatalf("failed to create GCM: %v", err)
+	}
 	v.masterKey = key
 	v.cipherGCM = gcm
 	v.nonceSize = gcm.NonceSize()
@@ -424,7 +420,11 @@ func (v *Vault) Set(key, value string) error {
 		}
 	}
 
-	return v.save()
+	err := v.save()
+	if err == nil {
+		LogAudit("set", key, "value set", v.masterKey)
+	}
+	return err
 }
 
 func (v *Vault) Get(key string) (string, error) {
@@ -517,7 +517,11 @@ func (v *Vault) Delete(key string) error {
 		delete(v.data, key)
 	}
 
-	return v.save()
+	err := v.save()
+	if err == nil {
+		LogAudit("delete", key, "deleted", v.masterKey)
+	}
+	return err
 }
 
 func (v *Vault) Copy(key string) error {
@@ -574,33 +578,7 @@ func Execute() {
 		fmt.Println("Error:", err)
 		return
 	}
-	go startHTTP(vault)
 	cliLoop(vault)
-}
-
-func startHTTP(vault *Vault) {
-	http.HandleFunc("/vault/", func(w http.ResponseWriter, r *http.Request) {
-		key := strings.TrimPrefix(r.URL.Path, "/vault/")
-		switch r.Method {
-		case http.MethodGet:
-			val, err := vault.Get(key)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusNotFound)
-				return
-			}
-			fmt.Fprintln(w, val)
-		case http.MethodPost, http.MethodPut:
-			body, _ := io.ReadAll(r.Body)
-			_ = vault.Set(key, string(body))
-			w.WriteHeader(http.StatusNoContent)
-		case http.MethodDelete:
-			_ = vault.Delete(key)
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		}
-	})
-	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func (v *Vault) LoadFromEnv() {
@@ -627,17 +605,22 @@ func cliLoop(vault *Vault) {
 			break
 		}
 		parts := strings.Fields(scanner.Text())
-
 		if len(parts) > 0 {
-			if strings.ToLower(parts[0]) == "list" {
+			cmd := strings.ToLower(parts[0])
+			if cmd == "exit" || cmd == "quit" {
+				vault.save()
+				fmt.Println("Exiting vault CLI.")
+				clipboard.WriteAll("")
+				return
+			}
+			if cmd == "list" {
 				keys := vault.List()
 				for _, k := range keys {
 					fmt.Println(k)
 				}
 				continue
 			}
-			if strings.ToLower(parts[0]) == "enrich" {
-
+			if cmd == "enrich" {
 				if err := vault.EnrichEnv(); err != nil {
 					fmt.Println("error:", err)
 				} else {
@@ -696,9 +679,20 @@ func cliLoop(vault *Vault) {
 func (v *Vault) List() []string {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	keys := make([]string, 0, len(v.data))
-	for k := range v.data {
-		keys = append(keys, k)
-	}
+	var keys []string
+	flattenKeys(v.data, "", &keys)
 	return keys
+}
+
+func flattenKeys(data map[string]any, prefix string, keys *[]string) {
+	for k, v := range data {
+		fullKey := k
+		if prefix != "" {
+			fullKey = prefix + "." + k
+		}
+		*keys = append(*keys, fullKey)
+		if m, ok := v.(map[string]any); ok {
+			flattenKeys(m, fullKey, keys)
+		}
+	}
 }
