@@ -33,6 +33,7 @@ const (
 	saltSize          = 16
 )
 
+// initStorage initializes the vault storage directory.
 func initStorage() error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -50,6 +51,7 @@ func initStorage() error {
 	return nil
 }
 
+// Vault represents the secret storage with encryption, reset and rate limiting.
 type Vault struct {
 	data           map[string]any
 	masterKey      []byte
@@ -66,6 +68,7 @@ type Vault struct {
 	ResetCode      string
 }
 
+// initCipher initializes the AES-GCM cipher with the provided password and salt.
 func (v *Vault) initCipher(pw []byte, salt []byte) {
 	if salt == nil {
 		salt = make([]byte, saltSize)
@@ -86,6 +89,7 @@ func (v *Vault) initCipher(pw []byte, salt []byte) {
 	v.nonceSize = gcm.NonceSize()
 }
 
+// init initializes the vault by setting up storage.
 func init() {
 	if err := initStorage(); err != nil {
 		log.Fatal(err)
@@ -93,10 +97,12 @@ func init() {
 	defaultVault = New()
 }
 
+// New creates a new Vault instance.
 func New() *Vault {
 	return &Vault{data: make(map[string]any)}
 }
 
+// Get retrieves the value associated with the provided key.
 func Get(key string) (string, error) {
 	if defaultVault == nil {
 		return "", fmt.Errorf("vault not initialized")
@@ -104,6 +110,7 @@ func Get(key string) (string, error) {
 	return defaultVault.Get(key)
 }
 
+// LoadFromEnv loads environment variables into the vault.
 func LoadFromEnv() {
 	if defaultVault == nil {
 		log.Fatal("vault not initialized")
@@ -111,10 +118,12 @@ func LoadFromEnv() {
 	defaultVault.LoadFromEnv()
 }
 
+// FilePath returns the path of the vault storage file.
 func FilePath() string {
 	return filepath.Join(vaultDir, storageFile)
 }
 
+// promptMaster prompts for the MasterKey and initializes the vault accordingly.
 func (v *Vault) promptMaster() error {
 
 	if time.Since(v.authedAt) < authCacheDuration && v.cipherGCM != nil {
@@ -225,11 +234,13 @@ func (v *Vault) promptMaster() error {
 	}
 }
 
+// sendResetEmail simulates sending a reset code via email.
 func sendResetEmail(code string) {
 
 	fmt.Printf("Sending reset code %s to user's email...\n", code)
 }
 
+// forceReset forces the reset flow using a reset code.
 func (v *Vault) forceReset() error {
 
 	if v.ResetCode == "" {
@@ -283,6 +294,7 @@ func (v *Vault) forceReset() error {
 	}
 }
 
+// load decrypts and loads the vault data from disk.
 func (v *Vault) load() error {
 	enc, err := os.ReadFile(FilePath())
 	if err != nil {
@@ -330,6 +342,7 @@ func (v *Vault) load() error {
 	return nil
 }
 
+// save encrypts and saves the vault data to disk.
 func (v *Vault) save() error {
 
 	persist := struct {
@@ -362,6 +375,7 @@ func (v *Vault) save() error {
 	return os.WriteFile(FilePath(), []byte(enc), 0600)
 }
 
+// Set assigns a secret value to a key.
 func (v *Vault) Set(key, value string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -427,6 +441,7 @@ func (v *Vault) Set(key, value string) error {
 	return err
 }
 
+// Get returns the decrypted secret for a given key.
 func (v *Vault) Get(key string) (string, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -478,6 +493,7 @@ func (v *Vault) Get(key string) (string, error) {
 	}
 }
 
+// Delete removes a secret from the vault.
 func (v *Vault) Delete(key string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -524,6 +540,7 @@ func (v *Vault) Delete(key string) error {
 	return err
 }
 
+// Copy copies a secret to the clipboard.
 func (v *Vault) Copy(key string) error {
 	val, err := v.Get(key)
 	if err != nil {
@@ -532,6 +549,7 @@ func (v *Vault) Copy(key string) error {
 	return clipboard.WriteAll(val)
 }
 
+// Env sets a secret as an environment variable.
 func (v *Vault) Env(key string) error {
 
 	secret, err := v.Get(key)
@@ -541,6 +559,7 @@ func (v *Vault) Env(key string) error {
 	return os.Setenv(key, secret)
 }
 
+// EnrichEnv sets all vault keys as environment variables.
 func (v *Vault) EnrichEnv() error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -565,12 +584,14 @@ func (v *Vault) EnrichEnv() error {
 	return nil
 }
 
+// initData initializes the vault data map if it's nil.
 func (v *Vault) initData() {
 	if v.data == nil {
 		v.data = make(map[string]any)
 	}
 }
 
+// Execute runs the vault CLI loop.
 func Execute() {
 	vault := New()
 	err := vault.promptMaster()
@@ -581,6 +602,7 @@ func Execute() {
 	cliLoop(vault)
 }
 
+// LoadFromEnv loads environment variables into the vault.
 func (v *Vault) LoadFromEnv() {
 	envs := os.Environ()
 	for _, e := range envs {
@@ -597,6 +619,7 @@ func (v *Vault) LoadFromEnv() {
 	}
 }
 
+// cliLoop handles the interactive CLI commands.
 func cliLoop(vault *Vault) {
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
@@ -676,6 +699,7 @@ func cliLoop(vault *Vault) {
 	}
 }
 
+// List returns a flattened list of keys stored in the vault.
 func (v *Vault) List() []string {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -684,6 +708,7 @@ func (v *Vault) List() []string {
 	return keys
 }
 
+// flattenKeys recursively flattens nested keys.
 func flattenKeys(data map[string]any, prefix string, keys *[]string) {
 	for k, v := range data {
 		fullKey := k

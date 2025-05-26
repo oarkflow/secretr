@@ -12,6 +12,7 @@ const (
 )
 
 // DeriveKey uses Argon2id to produce a 32‐byte key from the password and salt.
+// It ensures secure derivation of an encryption key.
 func DeriveKey(password, salt []byte) []byte {
 	return argon2.IDKey(password, salt, argonTime, argonMemory, argonThreads, argonKeyLen)
 }

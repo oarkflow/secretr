@@ -13,6 +13,7 @@ import (
 
 var auditMu sync.Mutex
 
+// LogAudit writes an audit log line with an HMAC signature to prevent tampering.
 func LogAudit(operation, key, details string, masterKey []byte) {
 	auditMu.Lock()
 	defer auditMu.Unlock()

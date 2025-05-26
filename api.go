@@ -22,6 +22,7 @@ var (
 	limMu     sync.Mutex
 )
 
+// authMiddleware validates the Bearer token provided in the Authorization header.
 func authMiddleware(next http.Handler) http.Handler {
 	token := os.Getenv("VAULT_TOKEN")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -34,6 +35,7 @@ func authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// rateLimitMiddleware limits the number of requests per IP address.
 func rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		limMu.Lock()
@@ -49,6 +51,7 @@ func rateLimitMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// resetRateLimiter periodically resets the rate limiter counts.
 func resetRateLimiter() {
 	for {
 		time.Sleep(time.Minute)
@@ -58,7 +61,7 @@ func resetRateLimiter() {
 	}
 }
 
-// vaultHTTPHandler dispatches HTTP methods for vault operations.
+// vaultHTTPHandler processes HTTP requests for vault operations.
 func vaultHTTPHandler(v *Vault, w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimPrefix(r.URL.Path, "/vault/")
 	switch r.Method {
@@ -96,8 +99,7 @@ func vaultHTTPHandler(v *Vault, w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// StartSecureHTTPServer runs the HTTP server using config from env,
-// handles TLS if provided, and shuts down gracefully.
+// StartSecureHTTPServer initializes and runs an HTTP/HTTPS server with graceful shutdown.
 func StartSecureHTTPServer(v *Vault) {
 	mux := http.NewServeMux()
 	// Protect endpoints with auth and rate-limiting middleware.
@@ -158,7 +160,7 @@ func StartSecureHTTPServer(v *Vault) {
 		}
 	}()
 
-	// Listen for termination signals and then shutdown gracefully.
+	// Gracefully shutdown on termination signal.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

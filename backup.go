@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// ExportVault returns a JSON formatted export of the vault data.
 func ExportVault(v *Vault) (string, error) {
 	export := struct {
 		Data      map[string]any `json:"data"`
@@ -23,6 +24,7 @@ func ExportVault(v *Vault) (string, error) {
 	return string(b), nil
 }
 
+// ImportVault imports vault data from a JSON string.
 func ImportVault(v *Vault, jsonData string) error {
 	var imp struct {
 		Data map[string]any `json:"data"`
@@ -36,6 +38,7 @@ func ImportVault(v *Vault, jsonData string) error {
 	return v.save()
 }
 
+// BackupVault creates a backup file containing the vault export.
 func BackupVault(v *Vault) error {
 	backupDir := filepath.Join(vaultDir, "backups")
 	os.MkdirAll(backupDir, 0700)

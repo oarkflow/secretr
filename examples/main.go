@@ -6,6 +6,7 @@ import (
 	"github.com/oarkflow/vault"
 )
 
+// main demonstrates how to load environment variables from the vault and retrieve secrets.
 func main() {
 	vault.LoadFromEnv()
 	fmt.Println(vault.Get("HOME"))
@@ -18,5 +19,5 @@ func main() {
 		panic(err)
 	}
 	fmt.Println("OPENAI_KEY  =", openAIKey)
-	fmt.Println("DEEPSEEK_KEY  =", deepSeekKey)
+	fmt.Println("DEEPSEEK_KEY =", deepSeekKey)
 }
