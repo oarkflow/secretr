@@ -294,7 +294,6 @@ func (v *Vault) PromptMaster() error {
 			return nil
 		}
 	} else {
-
 		enc, err := os.ReadFile(FilePath())
 		if err != nil {
 			return err
@@ -307,7 +306,6 @@ func (v *Vault) PromptMaster() error {
 			return fmt.Errorf("corrupt vault file")
 		}
 		salt := decoded[:saltSize]
-
 		for {
 			fmt.Print("Enter MasterKey: ")
 			pw, err := term.ReadPassword(int(os.Stdin.Fd()))
