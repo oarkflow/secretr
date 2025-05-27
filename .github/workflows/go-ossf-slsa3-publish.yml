@@ -20,6 +20,19 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      - name: Install system dependencies for GLFW
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev \
+            xorg-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxi-dev \
+            libxxf86vm-dev \
+            libx11-dev
+
       - name: Verify go.sum exists
         run: |
           if [ ! -f go.sum ]; then
@@ -45,7 +58,6 @@ jobs:
 
       - name: Build binary
         run: go build -v -o vault ./cmd
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
