@@ -10,10 +10,44 @@ permissions:
 
 jobs:
   build:
+    runs-on: ubuntu-latest
     permissions:
-      id-token: write     # Required to sign artifacts
-      contents: write     # Required to upload to releases
-      actions: read       # Required to read reusable workflows
-    uses: slsa-framework/slsa-github-generator/.github/workflows/builder_go_slsa3.yml@v1.5.0
-    with:
-      go-version: 1.24.2
+      id-token: write
+      contents: write
+      actions: read
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Verify go.sum exists
+        run: |
+          if [ ! -f go.sum ]; then
+            echo "❌ go.sum is missing!"
+            exit 1
+          fi
+          echo "✅ go.sum found"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.2
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-v3-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-mod-${{ runner.os }}-v3-
+
+      - name: Build binary
+        run: go build -v -o vault ./...
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault
+          path: ./vault
