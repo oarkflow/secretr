@@ -12,6 +12,9 @@ jobs:
   build:
     # pick runner per entry in the matrix
     runs-on: ${{ matrix.runs-on }}
+    defaults:
+      run:
+        shell: bash
 
     permissions:
       id-token: write
