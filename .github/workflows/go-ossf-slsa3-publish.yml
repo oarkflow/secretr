@@ -10,10 +10,9 @@ permissions:
 
 jobs:
   build:
-    # run on the default GitHub-hosted Linux runner
-    runs-on: ubuntu-latest
+    # pick runner per entry in the matrix
+    runs-on: ${{ matrix.runs-on }}
 
-    # allow us to upload release assets
     permissions:
       id-token: write
       contents: write
@@ -21,18 +20,35 @@ jobs:
 
     strategy:
       matrix:
-        goos: [linux, darwin, windows]
-        goarch: [amd64, arm64]
-        exclude:
-          - goos: windows
+        include:
+          # Linux builds (Ubuntu)
+          - goos: linux
+            goarch: amd64
+            runs-on: ubuntu-latest
+          - goos: linux
             goarch: arm64
+            runs-on: ubuntu-latest
+
+          # macOS builds (macOS)
+          - goos: darwin
+            goarch: amd64
+            runs-on: macos-latest
+          - goos: darwin
+            goarch: arm64
+            runs-on: macos-latest
+
+          # Windows build (Windows x64 only)
+          - goos: windows
+            goarch: amd64
+            runs-on: windows-latest
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Install system dependencies for GLFW
-        if: matrix.goos == 'linux'
+      # Install GLFW deps only on Ubuntu
+      - name: Install system dependencies for GLFW (Ubuntu)
+        if: matrix.runs-on == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -47,10 +63,7 @@ jobs:
 
       - name: Verify go.sum exists
         run: |
-          if [ ! -f go.sum ]; then
-            echo "❌ go.sum is missing!"
-            exit 1
-          fi
+          test -f go.sum || (echo "❌ go.sum is missing!" && exit 1)
           echo "✅ go.sum found"
 
       - name: Set up Go
@@ -72,6 +85,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 1
         run: |
           ext=""
           if [ "${{ matrix.goos }}" = "windows" ]; then
@@ -80,10 +94,8 @@ jobs:
           go build -v -o vault-${{ matrix.goos }}-${{ matrix.goarch }}${ext} ./cmd
 
       - name: Publish binaries to GitHub Release
-        # softprops/action-gh-release will find the release triggered by this workflow
         uses: softprops/action-gh-release@v1
         with:
-          # pick up all the vault-* files generated
           files: |
             vault-*-*
         env:
