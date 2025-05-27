@@ -10,17 +10,26 @@ permissions:
 
 jobs:
   build:
+    # run on the default GitHub-hosted Linux runner
     runs-on: ubuntu-latest
+
+    # allow us to upload release assets
     permissions:
       id-token: write
       contents: write
       actions: read
+
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Install system dependencies for GLFW
+        if: matrix.goos == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -56,10 +65,23 @@ jobs:
           restore-keys: |
             go-mod-${{ runner.os }}-v3-
 
-      - name: Build binary
-        run: go build -v -o vault ./cmd
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Build vault for ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          ext=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            ext=".exe"
+          fi
+          go build -v -o vault-${{ matrix.goos }}-${{ matrix.goarch }}${ext} ./cmd
+
+      - name: Publish binaries to GitHub Release
+        # softprops/action-gh-release will find the release triggered by this workflow
+        uses: softprops/action-gh-release@v1
         with:
-          name: vault
-          path: ./vault
+          # pick up all the vault-* files generated
+          files: |
+            vault-*-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
