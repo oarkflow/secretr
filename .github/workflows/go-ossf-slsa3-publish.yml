@@ -44,7 +44,7 @@ jobs:
             go-mod-${{ runner.os }}-v3-
 
       - name: Build binary
-        run: go build -v -o vault ./...
+        run: go build -v -o vault ./cmd
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
