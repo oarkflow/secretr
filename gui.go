@@ -61,9 +61,15 @@ func (g *GUI) showLogin() {
 	window := g.app.NewWindow("Vault Login")
 	window.Resize(fyne.NewSize(400, 200))
 	password := widget.NewPasswordEntry()
+	{
+		// Increase input box width.
+		size := password.MinSize()
+		size.Width = 300
+		password.Resize(size)
+	}
 	form := &widget.Form{
 		Items: []*widget.FormItem{
-			{Text: "Master Password", Widget: password},
+			{Widget: password},
 		},
 		OnSubmit: func() {
 			g.vault.SetPrompt(func() error {
@@ -110,9 +116,11 @@ func (g *GUI) showLogin() {
 	password.OnSubmitted = func(str string) {
 		form.OnSubmit()
 	}
-	window.SetContent(container.NewVBox(
-		widget.NewLabel("Enter Master Password"),
-		form,
+	window.SetContent(container.NewCenter(
+		container.NewVBox(
+			widget.NewLabelWithStyle("Enter Master Password", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+			form,
+		),
 	))
 	window.Canvas().Focus(password)
 	window.Show()
@@ -190,7 +198,7 @@ func (g *GUI) showMain() {
 	)
 	split := container.NewHSplit(sidebar, detail)
 	split.Offset = 0.3
-	g.mainWindow.SetContent(container.NewBorder(toolbar, nil, nil, nil, split))
+	g.mainWindow.SetContent(container.NewBorder(toolbar, nil, nil, nil, container.NewPadded(split)))
 	g.refreshKeys()
 	g.mainWindow.SetCloseIntercept(func() {
 		g.app.Quit()
@@ -302,6 +310,7 @@ func (g *GUI) deleteKey() {
 
 func RunGUI() {
 	application := app.New()
+	application.Settings().SetTheme(theme.Current())
 	icon, err := fyne.LoadResourceFromPath("./assets/icon.png")
 	if err == nil {
 		application.SetIcon(icon)
