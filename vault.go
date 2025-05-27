@@ -86,10 +86,17 @@ type Vault struct {
 	mu        sync.Mutex
 	cipherGCM cipher.AEAD
 	nonceSize int
+	// Added field for prompt override:
+	promptFunc func() error
 }
 
-// initCipher initializes the AES-GCM cipher with the provided password and salt.
-func (v *Vault) initCipher(pw []byte, salt []byte) {
+// Added method to set GUI prompt override.
+func (v *Vault) SetPrompt(prompt func() error) {
+	v.promptFunc = prompt
+}
+
+// InitCipher initializes the AES-GCM cipher with the provided password and salt.
+func (v *Vault) InitCipher(pw []byte, salt []byte) {
 	if salt == nil {
 		salt = make([]byte, saltSize)
 		rand.Read(salt)
@@ -107,6 +114,14 @@ func (v *Vault) initCipher(pw []byte, salt []byte) {
 	v.masterKey = key
 	v.cipherGCM = gcm
 	v.nonceSize = gcm.NonceSize()
+}
+
+func (v *Vault) Store() Persist {
+	return v.store
+}
+
+func SaltSize() int {
+	return saltSize
 }
 
 // init initializes the vault by setting up storage.
@@ -177,18 +192,27 @@ func FilePath() string {
 }
 
 // promptMaster prompts for the MasterKey and initializes the vault accordingly.
-func (v *Vault) promptMaster() error {
+func (v *Vault) PromptMaster() error {
 	if time.Since(v.authedAt) < authCacheDuration && v.cipherGCM != nil {
 		return nil
+	}
+
+	// Call the custom GUI prompt if set.
+	if v.promptFunc != nil {
+		err := v.promptFunc()
+		if err == nil {
+			v.authedAt = time.Now()
+		}
+		return err
 	}
 
 	// Use VAULT_MASTERKEY from the environment if set.
 	if envKey := os.Getenv("VAULT_MASTERKEY"); envKey != "" {
 		if _, err := os.Stat(FilePath()); os.IsNotExist(err) {
 			// Vault file doesn't exist; create new vault using env MasterKey.
-			v.initCipher([]byte(envKey), nil)
+			v.InitCipher([]byte(envKey), nil)
 			v.store.DeviceFingerprint = fingerprint
-			if err := v.save(); err != nil {
+			if err := v.Save(); err != nil {
 				return err
 			}
 			v.authedAt = time.Now()
@@ -207,8 +231,8 @@ func (v *Vault) promptMaster() error {
 				return fmt.Errorf("corrupt vault file")
 			}
 			salt := decoded[:saltSize]
-			v.initCipher([]byte(envKey), salt)
-			if err := v.load(); err == nil {
+			v.InitCipher([]byte(envKey), salt)
+			if err := v.Load(); err == nil {
 				v.authedAt = time.Now()
 				return nil
 			} else {
@@ -252,7 +276,7 @@ func (v *Vault) promptMaster() error {
 				continue
 			}
 
-			v.initCipher(pw1, nil)
+			v.InitCipher(pw1, nil)
 			v.store.DeviceFingerprint = fingerprint
 			fmt.Print("Enable Reset Password? (y/N): ")
 			respReader := bufio.NewReader(os.Stdin)
@@ -263,7 +287,7 @@ func (v *Vault) promptMaster() error {
 			} else {
 				v.store.EnableReset = false
 			}
-			if err := v.save(); err != nil {
+			if err := v.Save(); err != nil {
 				return err
 			}
 			v.authedAt = time.Now()
@@ -291,8 +315,8 @@ func (v *Vault) promptMaster() error {
 			if err != nil {
 				return err
 			}
-			v.initCipher(pw, salt)
-			if err := v.load(); err != nil {
+			v.InitCipher(pw, salt)
+			if err := v.Load(); err != nil {
 				if !strings.Contains(err.Error(), "Invalid MasterKey") {
 					return err
 				} else {
@@ -312,7 +336,7 @@ func (v *Vault) promptMaster() error {
 					} else {
 						v.store.BannedUntil = time.Now().Add(10 * time.Minute)
 						fmt.Printf("Too many attempts. Vault is banned until %v.\n", v.store.BannedUntil.Format(time.DateTime))
-						v.save()
+						v.Save()
 						return fmt.Errorf("failed to authenticate: vault banned until %v", v.store.BannedUntil)
 					}
 				}
@@ -392,9 +416,9 @@ func (v *Vault) forceReset() error {
 				fmt.Println("MasterKeys do not match. Try again.")
 				continue
 			}
-			v.initCipher(new1, nil)
+			v.InitCipher(new1, nil)
 			v.store = NewPersist() // Reset the store
-			if err := v.save(); err != nil {
+			if err := v.Save(); err != nil {
 				return err
 			}
 			fmt.Println("MasterKey has been reset successfully.")
@@ -403,8 +427,8 @@ func (v *Vault) forceReset() error {
 	}
 }
 
-// load decrypts and loads the vault data from disk.
-func (v *Vault) load() error {
+// Load decrypts and loads the vault data from disk.
+func (v *Vault) Load() error {
 	enc, err := os.ReadFile(FilePath())
 	if err != nil {
 		return err
@@ -443,8 +467,9 @@ func (v *Vault) load() error {
 	return nil
 }
 
-// save encrypts and saves the vault data to disk.
-func (v *Vault) save() error {
+// Save encrypts and saves the vault data to disk.
+func (v *Vault) Save() error {
+	v.store.DeviceFingerprint = fingerprint
 	plain, err := json.Marshal(v.store)
 	if err != nil {
 		return err
@@ -463,7 +488,7 @@ func (v *Vault) Set(key string, value any) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.initData()
-	if err := v.promptMaster(); err != nil {
+	if err := v.PromptMaster(); err != nil {
 		return err
 	}
 
@@ -520,7 +545,7 @@ func (v *Vault) Set(key string, value any) error {
 			v.store.Data[key] = value
 		}
 	}
-	err := v.save()
+	err := v.Save()
 	if err == nil {
 		LogAudit("set", key, "value set", v.masterKey)
 	}
@@ -532,7 +557,7 @@ func (v *Vault) Get(key string) (string, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.initData()
-	if err := v.promptMaster(); err != nil {
+	if err := v.PromptMaster(); err != nil {
 		return "", err
 	}
 	if strings.Contains(key, ".") {
@@ -584,7 +609,7 @@ func (v *Vault) Delete(key string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.initData()
-	if err := v.promptMaster(); err != nil {
+	if err := v.PromptMaster(); err != nil {
 		return err
 	}
 	if strings.Contains(key, ".") {
@@ -619,7 +644,7 @@ func (v *Vault) Delete(key string) error {
 		delete(v.store.Data, key)
 	}
 
-	err := v.save()
+	err := v.Save()
 	if err == nil {
 		LogAudit("delete", key, "deleted", v.masterKey)
 	}
@@ -680,7 +705,7 @@ func (v *Vault) initData() {
 // Execute runs the vault CLI loop.
 func Execute() {
 	vault := New()
-	err := vault.promptMaster()
+	err := vault.PromptMaster()
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
@@ -717,7 +742,7 @@ func cliLoop(vault *Vault) {
 		if len(parts) > 0 {
 			cmd := strings.ToLower(parts[0])
 			if cmd == "exit" || cmd == "quit" {
-				vault.save()
+				vault.Save()
 				fmt.Println("Exiting vault CLI.")
 				clipboard.WriteAll("")
 				return

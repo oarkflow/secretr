@@ -35,7 +35,7 @@ func ImportVault(v *Vault, jsonData string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.store.Data = imp.Data
-	return v.save()
+	return v.Save()
 }
 
 // BackupVault creates a backup file containing the vault export.
