@@ -42,6 +42,23 @@ func (g *GUI) Run() {
 	g.app.Run()
 }
 
+// Added helper to support Enter key for confirm dialogs.
+func showConfirmWithEnter(parent fyne.Window, title string, message string, callback func(ok bool)) {
+	oldHandler := parent.Canvas().OnTypedKey()
+	confirmDialog := dialog.NewConfirm(title, message, func(ok bool) {
+		parent.Canvas().SetOnTypedKey(oldHandler)
+		callback(ok)
+	}, parent)
+	confirmDialog.Show()
+	parent.Canvas().SetOnTypedKey(func(key *fyne.KeyEvent) {
+		if key.Name == fyne.KeyReturn {
+			confirmDialog.Hide()
+			parent.Canvas().SetOnTypedKey(oldHandler)
+			callback(true)
+		}
+	})
+}
+
 func (g *GUI) showLogin() {
 	window := g.app.NewWindow("Vault Login")
 	window.Resize(fyne.NewSize(400, 200))
@@ -74,7 +91,7 @@ func (g *GUI) showLogin() {
 			if err != nil {
 				// If the vault file doesn't exist, ask user to create a new one.
 				if strings.Contains(err.Error(), "no such file") {
-					dialog.ShowConfirm("Vault Not Found",
+					showConfirmWithEnter(window, "Vault Not Found",
 						"Vault file does not exist. Create new one using this Master Password?",
 						func(ok bool) {
 							if ok {
@@ -87,7 +104,7 @@ func (g *GUI) showLogin() {
 								window.Hide()
 								g.showMain()
 							}
-						}, window)
+						})
 					return
 				}
 				dialog.ShowError(err, window)
@@ -243,11 +260,9 @@ func (g *GUI) revealSecret() {
 }
 
 func (g *GUI) addKey() {
-	// create the entries *before* showing the form
 	keyEntry := widget.NewEntry()
 	valEntry := widget.NewMultiLineEntry()
 
-	// Updated: use dialog.NewForm instead of dialog.ShowForm
 	formDialog := dialog.NewForm("Add New Secret", "Save", "Cancel",
 		[]*widget.FormItem{
 			widget.NewFormItem("Key", keyEntry),
@@ -264,6 +279,8 @@ func (g *GUI) addKey() {
 			g.refreshKeys()
 		}, g.mainWindow)
 	formDialog.Show()
+	// Directly focus the first control.
+	g.mainWindow.Canvas().Focus(keyEntry)
 }
 
 func (g *GUI) editKey() {
@@ -273,7 +290,6 @@ func (g *GUI) editKey() {
 	valEntry := widget.NewMultiLineEntry()
 	valEntry.SetText(g.content.Text)
 
-	// Updated: use dialog.NewForm instead of dialog.ShowForm
 	formDialog := dialog.NewForm("Edit Secret", "Save", "Cancel",
 		[]*widget.FormItem{
 			widget.NewFormItem("Value", valEntry),
@@ -289,13 +305,15 @@ func (g *GUI) editKey() {
 			g.refreshKeys()
 		}, g.mainWindow)
 	formDialog.Show()
+	// Directly focus the control.
+	g.mainWindow.Canvas().Focus(valEntry)
 }
 
 func (g *GUI) deleteKey() {
 	if g.currentKey == "" {
 		return
 	}
-	dialog.ShowConfirm("Delete Secret",
+	showConfirmWithEnter(g.mainWindow, "Delete Secret",
 		"Delete \""+g.currentKey+"\"?",
 		func(ok bool) {
 			if !ok {
@@ -308,11 +326,16 @@ func (g *GUI) deleteKey() {
 			g.currentKey = ""
 			g.content.SetText("")
 			g.refreshKeys()
-		}, g.mainWindow)
+		})
 }
 
 func RunGUI() {
 	application := app.New()
+	// Set app icon if available.
+	icon, err := fyne.LoadResourceFromPath("./assets/icon.png")
+	if err == nil {
+		application.SetIcon(icon)
+	}
 	gui := NewGUI(application)
 	gui.Run()
 }
