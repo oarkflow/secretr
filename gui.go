@@ -78,6 +78,7 @@ func (g *GUI) showLogin() {
 						"Vault file does not exist. Create new one using this Master Password?",
 						func(ok bool) {
 							if ok {
+								g.vault.InitCipher([]byte(password.Text), nil)
 								// Create a new vault file. Assuming Save() creates it.
 								if err := g.vault.Save(); err != nil {
 									dialog.ShowError(err, window)
