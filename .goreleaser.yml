@@ -1,0 +1,57 @@
+project_name: vault
+
+builds:
+  - main: ./cmd/main.go
+    binary: vault
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+    ldflags: "-s -w"
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+  - format: zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+# Packaging for Linux distributions
+dockers: []
+nfpms:
+  - id: default
+    packager: deb
+    formats:
+      - deb
+    files:
+      - src: vault
+        dst: /usr/local/bin/vault
+    info:
+      name: vault
+      arch: amd64
+      maintainer: "Your Name <you@example.com>"
+      description: "Secret vault application"
+  - id: rpm
+    packager: rpm
+    formats:
+      - rpm
+    files:
+      - src: vault
+        dst: /usr/local/bin/vault
+    info:
+      name: vault
+      arch: amd64
+      maintainer: "Your Name <you@example.com>"
+      description: "Secret vault application"
+
+release:
+  github:
+    owner: your-github-username
+    name: vault
