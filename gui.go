@@ -60,6 +60,8 @@ func showConfirmWithEnter(parent fyne.Window, title string, message string, call
 func (g *GUI) showLogin() {
 	window := g.app.NewWindow("Vault Login")
 	window.Resize(fyne.NewSize(400, 200))
+	// Center the window on screen.
+	window.CenterOnScreen()
 	password := widget.NewPasswordEntry()
 	{
 		// Increase input box width.
@@ -129,6 +131,8 @@ func (g *GUI) showLogin() {
 func (g *GUI) showMain() {
 	g.mainWindow = g.app.NewWindow("Secret Vault")
 	g.mainWindow.Resize(fyne.NewSize(800, 600))
+	// Center the window on screen.
+	g.mainWindow.CenterOnScreen()
 	toolbar := widget.NewToolbar(
 		widget.NewToolbarAction(theme.ContentAddIcon(), g.addKey),
 		widget.NewToolbarAction(theme.ViewRefreshIcon(), g.refreshKeys),

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -48,12 +49,19 @@ func GetDeviceInfo() (*DeviceInfo, error) {
 }
 
 func generateFingerprint(ids map[string]string) (string, error) {
-	var parts []string
-	for _, v := range ids {
-		parts = append(parts, v)
-	}
-	if len(parts) == 0 {
+	if len(ids) == 0 {
 		return "", fmt.Errorf("no identifiers available")
+	}
+	keys := make([]string, 0, len(ids))
+	for k := range ids {
+		if v := strings.TrimSpace(ids[k]); v != "" {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	var parts []string
+	for _, k := range keys {
+		parts = append(parts, strings.TrimSpace(ids[k]))
 	}
 	hash := sha256.Sum256([]byte(strings.Join(parts, "|")))
 	return fmt.Sprintf("%x", hash), nil
@@ -238,7 +246,7 @@ func getLinuxHardwareInfo() map[string]string {
 func GetDeviceFingerPrint() (string, error) {
 	deviceInfo, err := GetDeviceInfo()
 	if err != nil {
-		return "", fmt.Errorf("Error getting device info: %v\n", err)
+		return "", fmt.Errorf("error getting device info: %v", err)
 	}
 	return deviceInfo.Fingerprint, nil
 }
