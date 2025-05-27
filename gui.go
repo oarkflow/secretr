@@ -1,4 +1,4 @@
-package main
+package vault
 
 import (
 	"encoding/base64"
@@ -15,14 +15,12 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/oarkflow/clipboard"
-
-	"github.com/oarkflow/vault"
 )
 
 type GUI struct {
 	app        fyne.App
 	mainWindow fyne.Window
-	vault      *vault.Vault
+	vault      *Vault
 
 	keyList     *widget.List
 	search      *widget.Entry
@@ -32,10 +30,10 @@ type GUI struct {
 	currentKey  string
 }
 
-func New(a fyne.App) *GUI {
+func NewGUI(a fyne.App) *GUI {
 	return &GUI{
 		app:   a,
-		vault: vault.New(),
+		vault: New(),
 	}
 }
 
@@ -49,6 +47,7 @@ func (g *GUI) showLogin() {
 	window.Resize(fyne.NewSize(400, 200))
 
 	password := widget.NewPasswordEntry()
+
 	form := &widget.Form{
 		Items: []*widget.FormItem{
 			{Text: "Master Password", Widget: password},
@@ -56,7 +55,7 @@ func (g *GUI) showLogin() {
 		OnSubmit: func() {
 			// setup the prompt with provided master key
 			g.vault.SetPrompt(func() error {
-				enc, err := os.ReadFile(vault.FilePath())
+				enc, err := os.ReadFile(FilePath())
 				if err != nil {
 					return err
 				}
@@ -64,10 +63,10 @@ func (g *GUI) showLogin() {
 				if err != nil {
 					return err
 				}
-				if len(decoded) < vault.SaltSize() {
+				if len(decoded) < SaltSize() {
 					return fmt.Errorf("corrupt vault file")
 				}
-				salt := decoded[:vault.SaltSize()]
+				salt := decoded[:SaltSize()]
 				g.vault.InitCipher([]byte(password.Text), salt)
 				return g.vault.Load()
 			})
@@ -97,11 +96,17 @@ func (g *GUI) showLogin() {
 			g.showMain()
 		},
 	}
+	// Allow Enter key to submit the form.
+	password.OnSubmitted = func(str string) {
+		form.OnSubmit()
+	}
 
 	window.SetContent(container.NewVBox(
 		widget.NewLabel("Enter Master Password"),
 		form,
 	))
+	// By default, focus the password text box.
+	window.Canvas().Focus(password)
 	window.Show()
 }
 
@@ -144,10 +149,34 @@ func (g *GUI) showMain() {
 
 	g.content = widget.NewMultiLineEntry()
 	g.content.Wrapping = fyne.TextWrapWord
+	// Initially hide secret content by default.
+	g.content.SetText("Secret hidden")
 
 	copyButton := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
-		clipboard.WriteAll(g.content.Text)
+		if g.currentKey == "" {
+			dialog.ShowInformation("Info", "Select a key before copying", g.mainWindow)
+			return
+		}
+		secret, err := g.vault.Get(g.currentKey)
+		if err != nil {
+			dialog.ShowError(err, g.mainWindow)
+			return
+		}
+		clipboard.WriteAll(secret)
 	})
+
+	// Replace separate Reveal and Hide buttons with a single toggle button.
+	var toggleButton *widget.Button
+	toggleButton = widget.NewButton("Reveal", func() {
+		if toggleButton.Text == "Reveal" {
+			g.revealSecret()
+			toggleButton.SetText("Hide")
+		} else {
+			g.content.SetText("Secret hidden")
+			toggleButton.SetText("Reveal")
+		}
+	})
+
 	editButton := widget.NewButtonWithIcon("Edit", theme.DocumentCreateIcon(), func() {
 		g.editKey()
 	})
@@ -157,7 +186,7 @@ func (g *GUI) showMain() {
 
 	sidebar := container.NewBorder(g.search, nil, nil, nil, g.keyList)
 	detail := container.NewBorder(
-		container.NewHBox(copyButton, editButton, deleteButton),
+		container.NewHBox(copyButton, toggleButton, editButton, deleteButton),
 		nil, nil, nil,
 		g.content,
 	)
@@ -166,6 +195,10 @@ func (g *GUI) showMain() {
 
 	g.mainWindow.SetContent(container.NewBorder(toolbar, nil, nil, nil, split))
 	g.refreshKeys()
+	// When main window closes, quit the application.
+	g.mainWindow.SetCloseIntercept(func() {
+		g.app.Quit()
+	})
 	g.mainWindow.Show()
 }
 
@@ -194,12 +227,18 @@ func (g *GUI) filterKeys(query string) {
 
 func (g *GUI) showKeyDetails(id widget.ListItemID) {
 	g.currentKey = g.keyData[id]
-	val, err := g.vault.Get(g.currentKey)
+	// Do not show the actual secret by default.
+	g.content.SetText("Secret hidden")
+}
+
+// New: revealSecret gets and displays the secret for currentKey.
+func (g *GUI) revealSecret() {
+	secret, err := g.vault.Get(g.currentKey)
 	if err != nil {
 		dialog.ShowError(err, g.mainWindow)
 		return
 	}
-	g.content.SetText(val)
+	g.content.SetText(secret)
 }
 
 func (g *GUI) addKey() {
@@ -271,9 +310,8 @@ func (g *GUI) deleteKey() {
 		}, g.mainWindow)
 }
 
-func main() {
-	// wire up your GUI struct and run it
+func RunGUI() {
 	application := app.New()
-	gui := New(application)
+	gui := NewGUI(application)
 	gui.Run()
 }
