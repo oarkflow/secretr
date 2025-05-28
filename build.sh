@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
+# Add a check at the top to prevent running the script with sudo
+if [ "$(id -u)" -eq 0 ]; then
+    echo "Please run this script as a normal user; it will use sudo as needed."
+    exit 1
+fi
 set -euo pipefail
 export CGO_ENABLED=1
 #--------------------------------------------------
 # Configuration (override via env)
 #--------------------------------------------------
-# default platforms & architectures (space-separated)
-PLATFORMS=${PLATFORMS:-"darwin"}
-ARCHS=${ARCHS:-"amd64"}
+# Auto-detect platform and architecture if not provided
+PLATFORMS=${PLATFORMS:-$(uname -s | tr '[:upper:]' '[:lower:]')}
+ARCH_RAW=$(uname -m)
+if [[ "$ARCH_RAW" == "x86_64" ]]; then
+    ARCH_RAW="amd64"
+fi
+ARCHS=${ARCHS:-"$ARCH_RAW"}
 # output folder
 OUTDIR=${OUTDIR:-"bin"}
 # package artifacts? set to "true" or "false"
@@ -36,6 +45,8 @@ function build() {
     if [[ "$os" == "windows" ]]; then
         ext=".exe"
         pkgflag=".zip"
+    elif [[ "$os" == "darwin" ]]; then
+        pkgflag=".tar.gz"
     else
         pkgflag=".tar.gz"
     fi
@@ -54,20 +65,15 @@ function build() {
             pushd "${OUTDIR}" >/dev/null
             zip -qr "${name}.zip" "${name}.exe"
             popd >/dev/null
-            # Move package to Windows application directory
             mkdir -p "/c/Program Files/Vault"
             mv "${OUTDIR}/${name}.zip" "/c/Program Files/Vault/"
         elif [[ "$os" == "darwin" ]]; then
-            local appName="Vault"  # use "Vault" for the app bundle name
+            local appName="Vault"
             echo "  Packaging ${appName}.app"
-            # Create .app bundle structure
             mkdir -p "${OUTDIR}/${appName}.app/Contents/MacOS"
             mkdir -p "${OUTDIR}/${appName}.app/Contents/Resources"
-            # Copy binary into the app bundle
             cp "${OUTDIR}/${name}" "${OUTDIR}/${appName}.app/Contents/MacOS/${appName}"
-            # Copy assets (expects an existing ./assets folder)
             cp -R "./assets/." "${OUTDIR}/${appName}.app/Contents/Resources/"
-            # Create minimal Info.plist
             cat > "${OUTDIR}/${appName}.app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -84,16 +90,35 @@ function build() {
 </dict>
 </plist>
 EOF
-            # Move the .app bundle to the Applications directory
             mv "${OUTDIR}/${appName}.app" "/Applications/"
         elif [[ "$os" == "linux" ]]; then
-            echo "  Packaging for Linux"
-            # Copy binary to Linux executables directory
-            mkdir -p "/usr/local/bin"
-            cp "${OUTDIR}/${name}" "/usr/local/bin/Vault"
-            # Create desktop entry
-            mkdir -p "$HOME/.local/share/applications"
-            cat > "$HOME/.local/share/applications/Vault.desktop" <<EOF
+            if [[ "${DISTRO:-}" == "deb" ]]; then
+                echo "  Packaging ${name} as deb file"
+                STAGING_DIR=$(mktemp -d)
+                mkdir -p "${STAGING_DIR}/usr/local/bin"
+                cp "${OUTDIR}/${name}" "${STAGING_DIR}/usr/local/bin/Vault"
+                mkdir -p "${STAGING_DIR}/DEBIAN"
+                cat > "${STAGING_DIR}/DEBIAN/control" <<EOF
+Package: vault
+Version: ${VERSION}
+Section: utils
+Priority: optional
+Architecture: ${arch}
+Maintainer: Your Name <you@example.com>
+Description: Vault utility
+EOF
+                dpkg-deb --build "${STAGING_DIR}" "${OUTDIR}/${name}.deb"
+                rm -rf "${STAGING_DIR}"
+            elif [[ "${DISTRO:-}" == "rpm" ]]; then
+                echo "  Packaging ${name} as rpm file"
+                # Using fpm to build rpm; ensure fpm is installed
+                fpm -s dir -t rpm -n vault -v "${VERSION}" -a "${arch}" -C "${OUTDIR}" --prefix=/usr/local/bin Vault
+            else
+                echo "  Default packaging for Linux"
+                sudo mkdir -p "/usr/local/bin"
+                sudo install -m 755 "${OUTDIR}/${name}" /usr/local/bin/Vault
+                mkdir -p "$HOME/.local/share/applications"
+                cat > "$HOME/.local/share/applications/Vault.desktop" <<EOF
 [Desktop Entry]
 Name=Vault
 Exec=Vault
@@ -101,6 +126,7 @@ Icon=${OUTDIR}/${name}.png
 Type=Application
 Categories=Utility;
 EOF
+            fi
         else
             echo "  Packaging ${name}${pkgflag}"
             pushd "${OUTDIR}" >/dev/null

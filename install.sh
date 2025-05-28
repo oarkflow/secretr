@@ -103,31 +103,30 @@ EOF
         echo "Warning: Icon download failed."
     fi
 elif [[ "$OS" == "darwin" ]]; then
-    echo "Installing vault to /usr/local/bin (sudo may be required)"
+    echo "Installing vault to /Applications/Vault.app"
+    # Optionally install binary to /usr/local/bin for terminal usage
     sudo install -m 755 "$EXE" /usr/local/bin/vault
-    echo "Creating Vault.app in ~/Applications..."
-    APP_DIR="$HOME/Applications/Vault.app/Contents/MacOS"
-    mkdir -p "$APP_DIR"
-    cat > "$HOME/Applications/Vault.app/Contents/Info.plist" <<EOF
+    APP_BUNDLE="/Applications/Vault.app"
+    mkdir -p "${APP_BUNDLE}/Contents/MacOS"
+    mkdir -p "${APP_BUNDLE}/Contents/Resources"
+    cp "$EXE" "${APP_BUNDLE}/Contents/MacOS/Vault"
+    cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleExecutable</key>
-    <string>vault</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.example.vault</string>
     <key>CFBundleName</key>
     <string>Vault</string>
+    <key>CFBundleExecutable</key>
+    <string>Vault</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.example.Vault</string>
     <key>CFBundleVersion</key>
     <string>1.0</string>
-    <key>LSUIElement</key>
-    <true/>
 </dict>
 </plist>
 EOF
-    cp /usr/local/bin/vault "$APP_DIR/vault"
-    echo "Vault.app created at ~/Applications/Vault.app"
+    echo "Vault.app created at ${APP_BUNDLE}"
 else
     echo "For Windows, please move ${EXE} to a folder in your PATH."
 fi
