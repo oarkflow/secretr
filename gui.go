@@ -33,6 +33,11 @@ type GUI struct {
 	fullKeyData    []string
 	currentKey     string
 	filterDropdown *widget.Select
+	// New fields to support dynamic detail pane
+	split         *container.Split
+	defaultDetail fyne.CanvasObject
+	leftPane      fyne.CanvasObject // new field for the left pane
+	toolbar       fyne.CanvasObject // new field for the toolbar
 }
 
 func NewGUI(a fyne.App) *GUI {
@@ -150,9 +155,18 @@ func (g *GUI) showMain() {
 		widget.NewToolbarAction(theme.MailReplyIcon(), g.verifySignature),     // Verify Signature
 		widget.NewToolbarAction(theme.DocumentIcon(), g.generateHash),         // Generate Hash
 	)
+	g.toolbar = toolbar // saved earlier
 	g.search = widget.NewEntry()
 	g.search.SetPlaceHolder("Search keys...")
 	g.search.OnChanged = g.filterKeys
+	// Initialize filterDropdown if nil.
+	if g.filterDropdown == nil {
+		g.filterDropdown = widget.NewSelect([]string{"Secret Keys", "SSH Keys", "Certificates"}, func(selected string) {
+			g.refreshKeys()
+		})
+		g.filterDropdown.SetSelected("Secret Keys")
+	}
+	// IMPORTANT: Initialize keyList BEFORE creating the left pane.
 	g.keyList = widget.NewList(
 		func() int { return len(g.keyData) },
 		func() fyne.CanvasObject {
@@ -170,10 +184,12 @@ func (g *GUI) showMain() {
 
 			key := g.keyData[id]
 			label.SetText(key)
+			// Update the copy action so that for SSH Keys we copy the public key:
 			btn.OnTapped = func() {
 				if strings.HasPrefix(key, "ssh-key:") {
 					name := strings.TrimPrefix(key, "ssh-key:")
-					_ = clipboard.WriteAll(g.secretr.Store().SSHKeys[name])
+					ssh := g.secretr.Store().SSHKeys[name]
+					_ = clipboard.WriteAll(ssh.Public) // copy public key by default
 				} else if strings.HasPrefix(key, "certificate:") {
 					name := strings.TrimPrefix(key, "certificate:")
 					_ = clipboard.WriteAll(g.secretr.Store().Certificates[name])
@@ -184,6 +200,7 @@ func (g *GUI) showMain() {
 		},
 	)
 	g.keyList.OnSelected = g.showKeyDetails
+	// Original detail container for non-SSH keys:
 	g.content = widget.NewMultiLineEntry()
 	g.content.Wrapping = fyne.TextWrapWord
 	g.content.SetText("Secret hidden")
@@ -215,21 +232,24 @@ func (g *GUI) showMain() {
 	deleteButton := widget.NewButtonWithIcon("Delete", theme.DeleteIcon(), func() {
 		g.deleteKey()
 	})
-	g.filterDropdown = widget.NewSelect([]string{"Secret Keys", "SSH Keys", "Certificates"}, func(selected string) {
-		g.refreshKeys()
-	})
-	g.filterDropdown.SetSelected("Secret Keys") // Default selection
-	sidebar := container.NewBorder(
-		container.NewVBox(g.filterDropdown, g.search),
-		nil, nil, nil, g.keyList,
-	)
+	// Default detail pane; set in a Border layout.
 	detail := container.NewBorder(
 		container.NewHBox(copyButton, toggleButton, editButton, deleteButton),
 		nil, nil, nil,
 		g.content,
 	)
-	split := container.NewHSplit(sidebar, detail)
+	// Create left pane and detail as before.
+	left := container.NewBorder(
+		container.NewVBox(g.filterDropdown, g.search),
+		nil, nil, nil,
+		g.keyList,
+	)
+	// Build split container.
+	split := container.NewHSplit(left, detail)
 	split.Offset = 0.3
+	g.split = split
+	g.leftPane = left // save left pane for later use
+	g.defaultDetail = detail
 	g.mainWindow.SetContent(container.NewBorder(toolbar, nil, nil, nil, container.NewPadded(split)))
 	g.refreshKeys()
 	g.mainWindow.SetCloseIntercept(func() {
@@ -267,6 +287,10 @@ func (g *GUI) listCertificates() []string {
 }
 
 func (g *GUI) filterKeys(query string) {
+	// Ensure g.fullKeyData is not nil.
+	if g.fullKeyData == nil {
+		g.fullKeyData = []string{}
+	}
 	if query == "" {
 		g.keyData = make([]string, len(g.fullKeyData))
 		copy(g.keyData, g.fullKeyData)
@@ -280,24 +304,94 @@ func (g *GUI) filterKeys(query string) {
 		}
 		g.keyData = filtered
 	}
-	g.keyList.Refresh()
+	// Only refresh if keyList exists.
+	if g.keyList != nil {
+		g.keyList.Refresh()
+	}
 }
 
 func (g *GUI) showKeyDetails(id widget.ListItemID) {
 	key := g.keyData[id]
-	if strings.HasPrefix(key, "ssh-key:") || strings.HasPrefix(key, "certificate:") {
-		g.content.SetText("Secret hidden")
+	// Custom SSH key UI:
+	if strings.HasPrefix(key, "ssh-key:") {
+		name := strings.TrimPrefix(key, "ssh-key:")
+		ssh := g.secretr.Store().SSHKeys[name]
+		privateActual := ssh.Private
+		publicActual := ssh.Public
+		// Private Key section
+		privateEntry := widget.NewMultiLineEntry()
+		privateEntry.SetText("Private Key hidden")
+		privateEntry.Disable()
+		copyPrivateBtn := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
+			_ = clipboard.WriteAll(privateActual)
+		})
+		togglePrivateBtn := widget.NewButton("Reveal", nil)
+		togglePrivateBtn.OnTapped = func() {
+			if togglePrivateBtn.Text == "Reveal" {
+				privateEntry.SetText(privateActual)
+				togglePrivateBtn.SetText("Hide")
+			} else {
+				privateEntry.SetText("Private Key hidden")
+				togglePrivateBtn.SetText("Reveal")
+			}
+		}
+		privateSection := container.NewVBox(
+			widget.NewLabel("Private Key"),
+			privateEntry,
+			container.NewHBox(copyPrivateBtn, togglePrivateBtn),
+		)
+		// Public Key section
+		publicEntry := widget.NewMultiLineEntry()
+		publicEntry.SetText("Public Key hidden")
+		publicEntry.Disable()
+		copyPublicBtn := widget.NewButtonWithIcon("Copy", theme.ContentCopyIcon(), func() {
+			_ = clipboard.WriteAll(publicActual)
+		})
+		togglePublicBtn := widget.NewButton("Reveal", nil)
+		togglePublicBtn.OnTapped = func() {
+			if togglePublicBtn.Text == "Reveal" {
+				publicEntry.SetText(publicActual)
+				togglePublicBtn.SetText("Hide")
+			} else {
+				publicEntry.SetText("Public Key hidden")
+				togglePublicBtn.SetText("Reveal")
+			}
+		}
+		publicSection := container.NewVBox(
+			widget.NewLabel("Public Key"),
+			publicEntry,
+			container.NewHBox(copyPublicBtn, togglePublicBtn),
+		)
+		// Top-level Delete button for SSH key
+		deleteBtn := widget.NewButtonWithIcon("Delete", theme.DeleteIcon(), func() {
+			g.deleteKey()
+		})
+		sshDetail := container.NewVBox(
+			deleteBtn,
+			privateSection,
+			publicSection,
+		)
+		// Re-create the split container with new right pane and update main window content.
+		newSplit := container.NewHSplit(g.leftPane, sshDetail)
+		newSplit.Offset = g.split.Offset
+		g.split = newSplit
+		g.mainWindow.SetContent(container.NewBorder(g.toolbar, nil, nil, nil, container.NewPadded(newSplit)))
 		g.currentKey = key
-	} else {
-		g.currentKey = key
-		g.content.SetText("Secret hidden")
+		return
 	}
+	// For non-SSH keys, revert to the default detail pane.
+	g.currentKey = key
+	g.content.SetText("Secret hidden")
+	newSplit := container.NewHSplit(g.leftPane, g.defaultDetail)
+	newSplit.Offset = g.split.Offset
+	g.split = newSplit
+	g.mainWindow.SetContent(container.NewBorder(g.toolbar, nil, nil, nil, container.NewPadded(newSplit)))
 }
 
 func (g *GUI) revealSecret() {
 	if strings.HasPrefix(g.currentKey, "ssh-key:") {
-		name := strings.TrimPrefix(g.currentKey, "ssh-key:")
-		g.content.SetText(g.secretr.Store().SSHKeys[name])
+		g.revealSSHKey()
+		return
 	} else if strings.HasPrefix(g.currentKey, "certificate:") {
 		name := strings.TrimPrefix(g.currentKey, "certificate:")
 		g.content.SetText(g.secretr.Store().Certificates[name])
@@ -340,7 +434,9 @@ func (g *GUI) editKey() {
 	valEntry := widget.NewMultiLineEntry()
 	if strings.HasPrefix(g.currentKey, "ssh-key:") {
 		name := strings.TrimPrefix(g.currentKey, "ssh-key:")
-		valEntry.SetText(g.secretr.Store().SSHKeys[name])
+		ssh := g.secretr.Store().SSHKeys[name]
+		// Combine private and public keys on separate lines.
+		valEntry.SetText(ssh.Private + "\n" + ssh.Public)
 	} else if strings.HasPrefix(g.currentKey, "certificate:") {
 		name := strings.TrimPrefix(g.currentKey, "certificate:")
 		valEntry.SetText(g.secretr.Store().Certificates[name])
@@ -357,7 +453,13 @@ func (g *GUI) editKey() {
 			}
 			if strings.HasPrefix(g.currentKey, "ssh-key:") {
 				name := strings.TrimPrefix(g.currentKey, "ssh-key:")
-				g.secretr.Store().SSHKeys[name] = valEntry.Text
+				parts := strings.SplitN(valEntry.Text, "\n", 2)
+				if len(parts) < 2 {
+					dialog.ShowError(fmt.Errorf("please provide both private and public keys"), g.mainWindow)
+					return
+				}
+				// Save as SSHKey struct.
+				g.secretr.Store().SSHKeys[name] = SSHKey{Private: parts[0], Public: parts[1]}
 			} else if strings.HasPrefix(g.currentKey, "certificate:") {
 				name := strings.TrimPrefix(g.currentKey, "certificate:")
 				g.secretr.Store().Certificates[name] = valEntry.Text
@@ -571,6 +673,150 @@ func (g *GUI) generateHash() {
 		}, g.mainWindow)
 	formDialog.Show()
 	g.mainWindow.Canvas().Focus(dataEntry)
+}
+
+func (g *GUI) addSSHKey() {
+	privateKeyEntry := widget.NewMultiLineEntry()
+	privateKeyEntry.SetPlaceHolder("Paste your private key here")
+	publicKeyEntry := widget.NewMultiLineEntry()
+	publicKeyEntry.SetPlaceHolder("Paste your public key here")
+	var generateCheck *widget.Check
+	generateCheck = widget.NewCheck("Generate New Keys", func(checked bool) {
+		if checked {
+			p, pub, err := generateSSHKeyPair()
+			if err != nil {
+				dialog.ShowError(err, g.mainWindow)
+				generateCheck.SetChecked(false)
+				return
+			}
+			privateKeyEntry.SetText(p)
+			publicKeyEntry.SetText(pub)
+			privateKeyEntry.Disable()
+			publicKeyEntry.Disable()
+		} else {
+			privateKeyEntry.SetText("")
+			publicKeyEntry.SetText("")
+			privateKeyEntry.Enable()
+			publicKeyEntry.Enable()
+		}
+	})
+	formDialog := dialog.NewForm("Add SSH Key", "Save", "Cancel",
+		[]*widget.FormItem{
+			widget.NewFormItem("Generate Option", generateCheck),
+			widget.NewFormItem("Private Key", privateKeyEntry),
+			widget.NewFormItem("Public Key", publicKeyEntry),
+		},
+		func(ok bool) {
+			if !ok {
+				return
+			}
+			name := fmt.Sprintf("ssh-key:%d", time.Now().Unix())
+			g.secretr.Store().SSHKeys[name] = SSHKey{
+				Private: privateKeyEntry.Text,
+				Public:  publicKeyEntry.Text,
+			}
+			g.refreshKeys()
+		}, g.mainWindow)
+	formDialog.Show()
+	g.mainWindow.Canvas().Focus(privateKeyEntry)
+}
+
+func (g *GUI) editSSHKey() {
+	if !strings.HasPrefix(g.currentKey, "ssh-key:") {
+		return
+	}
+	name := strings.TrimPrefix(g.currentKey, "ssh-key:")
+	keys := g.secretr.Store().SSHKeys[name]
+	privateKey, publicKey := keys.Private, keys.Public
+	privateKeyEntry := widget.NewMultiLineEntry()
+	privateKeyEntry.SetPlaceHolder("Edit private key")
+	privateKeyEntry.SetText(privateKey)
+	publicKeyEntry := widget.NewMultiLineEntry()
+	publicKeyEntry.SetPlaceHolder("Edit public key")
+	publicKeyEntry.SetText(publicKey)
+	var generateCheck *widget.Check
+	generateCheck = widget.NewCheck("Generate New Keys", func(checked bool) {
+		if checked {
+			p, pub, err := generateSSHKeyPair()
+			if err != nil {
+				dialog.ShowError(err, g.mainWindow)
+				generateCheck.SetChecked(false)
+				return
+			}
+			privateKeyEntry.SetText(p)
+			publicKeyEntry.SetText(pub)
+			privateKeyEntry.Disable()
+			publicKeyEntry.Disable()
+		} else {
+			privateKeyEntry.Enable()
+			publicKeyEntry.Enable()
+		}
+	})
+	formDialog := dialog.NewForm("Edit SSH Key", "Save", "Cancel",
+		[]*widget.FormItem{
+			widget.NewFormItem("Generate Option", generateCheck),
+			widget.NewFormItem("Private Key", privateKeyEntry),
+			widget.NewFormItem("Public Key", publicKeyEntry),
+		},
+		func(ok bool) {
+			if !ok {
+				return
+			}
+			g.secretr.Store().SSHKeys[name] = SSHKey{
+				Private: privateKeyEntry.Text,
+				Public:  publicKeyEntry.Text,
+			}
+			g.refreshKeys()
+		}, g.mainWindow)
+	formDialog.Show()
+	g.mainWindow.Canvas().Focus(privateKeyEntry)
+}
+
+func (g *GUI) revealSSHKey() {
+	if !strings.HasPrefix(g.currentKey, "ssh-key:") {
+		return
+	}
+	name := strings.TrimPrefix(g.currentKey, "ssh-key:")
+	keys := g.secretr.Store().SSHKeys[name]
+	privateKey, publicKey := keys.Private, keys.Public
+	privateKeyEntry := widget.NewMultiLineEntry()
+	privateKeyEntry.SetText("Private Key hidden")
+	privateKeyEntry.Disable()
+	publicKeyEntry := widget.NewMultiLineEntry()
+	publicKeyEntry.SetText("Public Key hidden")
+	publicKeyEntry.Disable()
+	copyPrivateKeyButton := widget.NewButtonWithIcon("Copy Private Key", theme.ContentCopyIcon(), func() {
+		_ = clipboard.WriteAll(privateKey)
+	})
+	copyPublicKeyButton := widget.NewButtonWithIcon("Copy Public Key", theme.ContentCopyIcon(), func() {
+		_ = clipboard.WriteAll(publicKey)
+	})
+	togglePrivateKeyButton := widget.NewButton("Reveal Private Key", nil)
+	togglePrivateKeyButton.OnTapped = func() {
+		if togglePrivateKeyButton.Text == "Reveal Private Key" {
+			privateKeyEntry.SetText(privateKey)
+			togglePrivateKeyButton.SetText("Hide Private Key")
+		} else {
+			privateKeyEntry.SetText("Private Key hidden")
+			togglePrivateKeyButton.SetText("Reveal Private Key")
+		}
+	}
+	togglePublicKeyButton := widget.NewButton("Reveal Public Key", nil)
+	togglePublicKeyButton.OnTapped = func() {
+		if togglePublicKeyButton.Text == "Reveal Public Key" {
+			publicKeyEntry.SetText(publicKey)
+			togglePublicKeyButton.SetText("Hide Public Key")
+		} else {
+			publicKeyEntry.SetText("Public Key hidden")
+			togglePublicKeyButton.SetText("Reveal Public Key")
+		}
+	}
+	dialog.ShowCustom("SSH Key Details", "Close", container.NewVBox(
+		container.NewHBox(copyPrivateKeyButton, togglePrivateKeyButton),
+		privateKeyEntry,
+		container.NewHBox(copyPublicKeyButton, togglePublicKeyButton),
+		publicKeyEntry,
+	), g.mainWindow)
 }
 
 func RunGUI() {

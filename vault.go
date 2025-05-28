@@ -60,6 +60,13 @@ func initStorage() error {
 	return nil
 }
 
+// NEW: Define a struct to hold SSH key pair.
+type SSHKey struct {
+	Private string `json:"private"`
+	Public  string `json:"public"`
+}
+
+// Modify Persist: change SSHKeys field type.
 type Persist struct {
 	Data              map[string]any    `json:"data"`
 	ResetAttempts     int               `json:"resetAttempts"`
@@ -69,7 +76,7 @@ type Persist struct {
 	EnableReset       bool              `json:"enableReset"`
 	ResetCode         string            `json:"resetCode"`
 	DeviceFingerprint string            `json:"deviceFingerprint"`
-	SSHKeys           map[string]string `json:"sshKeys"`
+	SSHKeys           map[string]SSHKey `json:"sshKeys"` // updated type
 	Certificates      map[string]string `json:"certificates"`
 }
 
@@ -83,7 +90,7 @@ func NewPersist() Persist {
 		EnableReset:       false,
 		ResetCode:         "",
 		DeviceFingerprint: fingerprint,
-		SSHKeys:           make(map[string]string),
+		SSHKeys:           make(map[string]SSHKey),
 		Certificates:      make(map[string]string),
 	}
 }
@@ -705,7 +712,7 @@ func (v *Secretr) initData() {
 		v.store.Data = make(map[string]any)
 	}
 	if v.store.SSHKeys == nil {
-		v.store.SSHKeys = make(map[string]string)
+		v.store.SSHKeys = make(map[string]SSHKey)
 	}
 	if v.store.Certificates == nil {
 		v.store.Certificates = make(map[string]string)
@@ -825,15 +832,42 @@ func cliLoop(secretr *Secretr) {
 				fmt.Println("secret copied to clipboard")
 			}
 		case "ssh-key":
-			if len(parts) < 3 || parts[1] != "generate" {
-				fmt.Println("usage: ssh-key generate <name>")
+			if len(parts) < 3 {
+				fmt.Println("Usage: ssh-key add|edit|reveal|copy <name>")
 				continue
 			}
+			action := parts[1]
 			name := parts[2]
-			if err := secretr.GenerateSSHKey(name); err != nil {
-				fmt.Println("error:", err)
-			} else {
-				fmt.Println("SSH Key generated successfully:", name)
+			switch action {
+			case "add":
+				if err := defaultSecretr.AddSSHKeyCLI(name); err != nil {
+					fmt.Println("error:", err)
+				} else {
+					fmt.Println("SSH Key added successfully:", name)
+				}
+			case "edit":
+				if err := defaultSecretr.EditSSHKeyCLI(name); err != nil {
+					fmt.Println("error:", err)
+				} else {
+					fmt.Println("SSH Key updated successfully:", name)
+				}
+			case "delete":
+				defaultSecretr.DeleteSSHKeyCLI(name)
+			case "reveal":
+				defaultSecretr.RevealSSHKeyCLI(name)
+			case "copy":
+				keyData, ok := defaultSecretr.store.SSHKeys[name]
+				if !ok || strings.TrimSpace(keyData.Private) == "" {
+					fmt.Println("SSH key not found")
+				} else {
+					if err := clipboard.WriteAll(keyData.Private); err != nil {
+						fmt.Println("error copying SSH key:", err)
+					} else {
+						fmt.Println("SSH key copied to clipboard")
+					}
+				}
+			default:
+				fmt.Println("Invalid ssh-key action. Use add|edit|reveal|copy.")
 			}
 		case "certificate":
 			if len(parts) < 4 || parts[1] != "generate" {
@@ -986,7 +1020,7 @@ func (v *Secretr) GenerateSSHKey(name string) error {
 	if err != nil {
 		return err
 	}
-	v.store.SSHKeys[name] = privateKey + "\n" + publicKey
+	v.store.SSHKeys[name] = SSHKey{Private: privateKey, Public: publicKey}
 	return v.Save()
 }
 
@@ -1098,4 +1132,111 @@ func generateHash(data string) string {
 func randSerialNumber() *big.Int {
 	serialNumber, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	return serialNumber
+}
+
+// AddSSHKeyCLI adds a new SSH key via CLI input.
+func (v *Secretr) AddSSHKeyCLI(name string) error {
+	// Ensure the cipher is initialized.
+	if v.cipherGCM == nil {
+		if err := v.PromptMaster(); err != nil {
+			return fmt.Errorf("failed to initialize cipher: %w", err)
+		}
+	}
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Generate new SSH key pair? (y/N): ")
+	resp, _ := reader.ReadString('\n')
+	resp = strings.TrimSpace(strings.ToLower(resp))
+	var privateKey, publicKey string
+	if resp == "y" {
+		pKey, pubKey, err := generateSSHKeyPair()
+		if err != nil {
+			return err
+		}
+		privateKey = pKey
+		publicKey = pubKey
+		fmt.Println("Generated new SSH key pair.")
+	} else {
+		fmt.Println("Paste Private Key (end with an empty line):")
+		privateKey = readMultilineFromStdin(reader)
+		fmt.Println("Paste Public Key (end with an empty line):")
+		publicKey = readMultilineFromStdin(reader)
+	}
+	v.store.SSHKeys[name] = SSHKey{Private: privateKey, Public: publicKey}
+	return v.Save()
+}
+
+// Add a helper for reading multi-line input from stdin.
+func readMultilineFromStdin(reader *bufio.Reader) string {
+	var lines []string
+	for {
+		line, _ := reader.ReadString('\n')
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			break
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// Updated EditSSHKeyCLI to offer the same option.
+func (v *Secretr) EditSSHKeyCLI(name string) error {
+	reader := bufio.NewReader(os.Stdin)
+	ssh, exists := v.store.SSHKeys[name]
+	if !exists {
+		return fmt.Errorf("SSH key '%s' not found", name)
+	}
+	oldPrivate := ssh.Private
+	oldPublic := ssh.Public
+	fmt.Printf("Current Private Key:\n%s\n", oldPrivate)
+	fmt.Print("Generate new SSH key pair? (y/N): ")
+	resp, _ := reader.ReadString('\n')
+	resp = strings.TrimSpace(strings.ToLower(resp))
+	var privateKey, publicKey string
+	if resp == "y" {
+		p, pub, err := generateSSHKeyPair()
+		if err != nil {
+			return err
+		}
+		privateKey = p
+		publicKey = pub
+		fmt.Println("Generated new SSH key pair.")
+	} else {
+		fmt.Println("Paste New Private Key (leave empty to keep current; end with an empty line):")
+		newPriv := readMultilineFromStdin(reader)
+		if newPriv == "" {
+			privateKey = oldPrivate
+		} else {
+			privateKey = newPriv
+		}
+		fmt.Println("Paste New Public Key (leave empty to keep current; end with an empty line):")
+		newPub := readMultilineFromStdin(reader)
+		if newPub == "" {
+			publicKey = oldPublic
+		} else {
+			publicKey = newPub
+		}
+	}
+	v.store.SSHKeys[name] = SSHKey{Private: privateKey, Public: publicKey}
+	return v.Save()
+}
+
+// Updated RevealSSHKeyCLI to show keys in two separate sections.
+func (v *Secretr) RevealSSHKeyCLI(name string) {
+	ssh, exists := v.store.SSHKeys[name]
+	if !exists {
+		fmt.Println("SSH key not found")
+		return
+	}
+	privateKey := ssh.Private
+	publicKey := ssh.Public
+	fmt.Println("----- Private Key -----")
+	fmt.Println(privateKey)
+	fmt.Println("----- Public Key -----")
+	fmt.Println(publicKey)
+}
+
+// Updated DeleteSSHKeyCLI to show keys in two separate sections.
+func (v *Secretr) DeleteSSHKeyCLI(name string) {
+	delete(v.store.SSHKeys, name)
 }

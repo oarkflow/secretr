@@ -177,22 +177,33 @@ func StartSecureHTTPServer(v *Secretr) {
 	})
 
 	mux.HandleFunc("/secretr/ssh-key", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
-			return
+		if r.Method == http.MethodPost {
+			var req struct {
+				Name       string `json:"name"`
+				PrivateKey string `json:"private_key"`
+				PublicKey  string `json:"public_key"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			v.store.SSHKeys[req.Name] = SSHKey{Private: req.PrivateKey, Public: req.PublicKey}
+			if err := v.Save(); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		} else if r.Method == http.MethodGet {
+			name := r.URL.Query().Get("name")
+			if name == "" {
+				http.Error(w, "Name is required", http.StatusBadRequest)
+				return
+			}
+			res := v.store.SSHKeys[name]
+			json.NewEncoder(w).Encode(res)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
-		var req struct {
-			Name string `json:"name"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := v.GenerateSSHKey(req.Name); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
 	})
 
 	mux.HandleFunc("/secretr/certificate", func(w http.ResponseWriter, r *http.Request) {
