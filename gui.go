@@ -285,13 +285,8 @@ func (g *GUI) filterKeys(query string) {
 
 func (g *GUI) showKeyDetails(id widget.ListItemID) {
 	key := g.keyData[id]
-	if strings.HasPrefix(key, "ssh-key:") {
-		name := strings.TrimPrefix(key, "ssh-key:")
-		g.content.SetText(g.secretr.Store().SSHKeys[name])
-		g.currentKey = key
-	} else if strings.HasPrefix(key, "certificate:") {
-		name := strings.TrimPrefix(key, "certificate:")
-		g.content.SetText(g.secretr.Store().Certificates[name])
+	if strings.HasPrefix(key, "ssh-key:") || strings.HasPrefix(key, "certificate:") {
+		g.content.SetText("Secret hidden")
 		g.currentKey = key
 	} else {
 		g.currentKey = key
