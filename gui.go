@@ -786,7 +786,11 @@ func (g *GUI) revealSSHKey() {
 	publicKeyEntry.SetText("Public Key hidden")
 	publicKeyEntry.Disable()
 	copyPrivateKeyButton := widget.NewButtonWithIcon("Copy Private Key", theme.ContentCopyIcon(), func() {
-		_ = clipboard.WriteAll(privateKey)
+		err := clipboard.WriteAll(privateKey)
+		fmt.Println(privateKey)
+		if err != nil {
+			panic(err)
+		}
 	})
 	copyPublicKeyButton := widget.NewButtonWithIcon("Copy Public Key", theme.ContentCopyIcon(), func() {
 		_ = clipboard.WriteAll(publicKey)
@@ -821,7 +825,8 @@ func (g *GUI) revealSSHKey() {
 
 func RunGUI() {
 	application := app.New()
-	application.Settings().SetTheme(theme.Current())
+	// Force light theme for dark text.
+	application.Settings().SetTheme(theme.LightTheme())
 	resource := fyne.NewStaticResource("secretr.png", defaultIcon)
 	application.SetIcon(resource)
 	gui := NewGUI(application)
