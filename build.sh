@@ -113,7 +113,15 @@ EOF
                 rm -rf "${STAGING_DIR}"
             elif [[ "${DISTRO:-}" == "rpm" ]]; then
                 echo "  Packaging ${name} as rpm file"
-                # Using fpm to build rpm; ensure fpm is installed
+                if ! command -v fpm >/dev/null 2>&1; then
+                    echo "fpm not found. Attempting to install dependencies and fpm..."
+                    if [[ -f /etc/debian_version ]]; then
+                        sudo apt-get update
+                        sudo apt-get install -y ruby ruby-dev build-essential
+                    fi
+                    gem install --no-document fpm
+                fi
+                # Using fpm to build rpm; fpm should now be installed
                 fpm -s dir -t rpm -n vault -v "${VERSION}" -a "${arch}" -C "${OUTDIR}" --prefix=/usr/local/bin Vault
             else
                 echo "  Default packaging for Linux"
