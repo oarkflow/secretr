@@ -4,22 +4,29 @@ import (
 	"bufio"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net/smtp"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
-	
+
 	"golang.org/x/term"
-	
+
 	"github.com/oarkflow/clipboard"
 )
 
@@ -54,14 +61,16 @@ func initStorage() error {
 }
 
 type Persist struct {
-	Data              map[string]any `json:"data"`
-	ResetAttempts     int            `json:"resetAttempts"`
-	NormalAttempts    int            `json:"normalAttempts"`
-	BannedUntil       time.Time      `json:"bannedUntil"`
-	LockedForever     bool           `json:"lockedForever"`
-	EnableReset       bool           `json:"enableReset"`
-	ResetCode         string         `json:"resetCode"`
-	DeviceFingerprint string         `json:"deviceFingerprint"`
+	Data              map[string]any    `json:"data"`
+	ResetAttempts     int               `json:"resetAttempts"`
+	NormalAttempts    int               `json:"normalAttempts"`
+	BannedUntil       time.Time         `json:"bannedUntil"`
+	LockedForever     bool              `json:"lockedForever"`
+	EnableReset       bool              `json:"enableReset"`
+	ResetCode         string            `json:"resetCode"`
+	DeviceFingerprint string            `json:"deviceFingerprint"`
+	SSHKeys           map[string]string `json:"sshKeys"`
+	Certificates      map[string]string `json:"certificates"`
 }
 
 func NewPersist() Persist {
@@ -74,6 +83,8 @@ func NewPersist() Persist {
 		EnableReset:       false,
 		ResetCode:         "",
 		DeviceFingerprint: fingerprint,
+		SSHKeys:           make(map[string]string),
+		Certificates:      make(map[string]string),
 	}
 }
 
@@ -88,6 +99,13 @@ type Secretr struct {
 	nonceSize int
 	// Added field for prompt override:
 	promptFunc func() error
+}
+
+// New creates a new Secretr instance.
+func New() *Secretr {
+	return &Secretr{
+		store: NewPersist(),
+	}
 }
 
 // Added method to set GUI prompt override.
@@ -135,11 +153,6 @@ func init() {
 		log.Fatal(err)
 	}
 	defaultSecretr = New()
-}
-
-// New creates a new Secretr instance.
-func New() *Secretr {
-	return &Secretr{store: NewPersist()}
 }
 
 func Set(key string, value any) error {
@@ -196,7 +209,7 @@ func (v *Secretr) PromptMaster() error {
 	if time.Since(v.authedAt) < authCacheDuration && v.cipherGCM != nil {
 		return nil
 	}
-	
+
 	// Call the custom GUI prompt if set.
 	if v.promptFunc != nil {
 		err := v.promptFunc()
@@ -205,7 +218,7 @@ func (v *Secretr) PromptMaster() error {
 		}
 		return err
 	}
-	
+
 	// Use SECRETR_MASTERKEY from the environment if set.
 	if envKey := os.Getenv("SECRETR_MASTERKEY"); envKey != "" {
 		if _, err := os.Stat(FilePath()); os.IsNotExist(err) {
@@ -240,7 +253,7 @@ func (v *Secretr) PromptMaster() error {
 			}
 		}
 	}
-	
+
 	if v.store.EnableReset && ((!v.store.BannedUntil.IsZero() && time.Now().Before(v.store.BannedUntil)) || v.store.LockedForever) {
 		if err := v.forceReset(); err != nil {
 			return err
@@ -248,14 +261,14 @@ func (v *Secretr) PromptMaster() error {
 		v.authedAt = time.Now()
 		return nil
 	}
-	
+
 	if v.store.LockedForever {
 		return fmt.Errorf("secretr locked permanently")
 	}
 	if !v.store.BannedUntil.IsZero() && time.Now().Before(v.store.BannedUntil) {
 		return fmt.Errorf("secretr banned until %v", v.store.BannedUntil.Format(time.DateTime))
 	}
-	
+
 	if _, err := os.Stat(FilePath()); os.IsNotExist(err) {
 		for {
 			fmt.Println("Secretr database not found. Setting up a new secretr.")
@@ -275,7 +288,6 @@ func (v *Secretr) PromptMaster() error {
 				fmt.Println("MasterKeys do not match. Try again.")
 				continue
 			}
-			
 			v.InitCipher(pw1, nil)
 			v.store.DeviceFingerprint = fingerprint
 			fmt.Print("Enable Reset Password? (y/N): ")
@@ -396,7 +408,6 @@ func (v *Secretr) forceReset() error {
 			fmt.Println("Incorrect reset code.")
 			continue
 		}
-		
 		for {
 			fmt.Print("Enter new MasterKey: ")
 			new1, err := term.ReadPassword(int(os.Stdin.Fd()))
@@ -438,7 +449,6 @@ func (v *Secretr) Load() error {
 	if len(decoded) < saltSize+v.nonceSize {
 		return fmt.Errorf("corrupt secretr file")
 	}
-	
 	data := decoded[saltSize:]
 	nonce := data[:v.nonceSize]
 	ciphertext := data[v.nonceSize:]
@@ -446,14 +456,12 @@ func (v *Secretr) Load() error {
 	if err != nil {
 		return fmt.Errorf("Invalid MasterKey or corrupt secretr file: %v", err)
 	}
-	
+
 	var persist Persist
 	if err := json.Unmarshal(plain, &persist); err != nil {
 		return err
 	}
 	v.store = persist
-	
-	// If device fingerprint is present in the secretr, verify it
 	if v.store.DeviceFingerprint != "" {
 		if v.store.DeviceFingerprint != fingerprint {
 			return fmt.Errorf("access denied: secretr cannot be accessed from this device")
@@ -475,7 +483,6 @@ func (v *Secretr) Save() error {
 	nonce := make([]byte, v.nonceSize)
 	_, _ = io.ReadFull(rand.Reader, nonce)
 	ciphertext := v.cipherGCM.Seal(nonce, nonce, plain, nil)
-	
 	final := append(v.salt, ciphertext...)
 	enc := base64.StdEncoding.EncodeToString(final)
 	return os.WriteFile(FilePath(), []byte(enc), 0600)
@@ -489,7 +496,6 @@ func (v *Secretr) Set(key string, value any) error {
 	if err := v.PromptMaster(); err != nil {
 		return err
 	}
-	
 	if strings.Contains(key, ".") {
 		parts := strings.Split(key, ".")
 		base := parts[0]
@@ -641,7 +647,7 @@ func (v *Secretr) Delete(key string) error {
 	} else {
 		delete(v.store.Data, key)
 	}
-	
+
 	err := v.Save()
 	if err == nil {
 		LogAudit("delete", key, "deleted", v.masterKey)
@@ -660,7 +666,7 @@ func (v *Secretr) Copy(key string) error {
 
 // Env sets a secret as an environment variable.
 func (v *Secretr) Env(key string) error {
-	
+
 	secret, err := v.Get(key)
 	if err != nil {
 		return err
@@ -697,6 +703,12 @@ func (v *Secretr) EnrichEnv() error {
 func (v *Secretr) initData() {
 	if v.store.Data == nil {
 		v.store.Data = make(map[string]any)
+	}
+	if v.store.SSHKeys == nil {
+		v.store.SSHKeys = make(map[string]string)
+	}
+	if v.store.Certificates == nil {
+		v.store.Certificates = make(map[string]string)
 	}
 }
 
@@ -762,7 +774,7 @@ func cliLoop(secretr *Secretr) {
 			}
 		}
 		if len(parts) < 2 {
-			fmt.Println("usage: set|get|delete|copy|env|enrich|list key [value]")
+			fmt.Println("usage: set|get|delete|copy|env|enrich|list|ssh-key|certificate|sign|verify|hash key [value]")
 			continue
 		}
 		op, key := strings.ToLower(parts[0]), parts[1]
@@ -798,7 +810,7 @@ func cliLoop(secretr *Secretr) {
 				fmt.Println("error:", err)
 			}
 		case "env":
-			
+
 			if err := secretr.Env(key); err != nil {
 				fmt.Println("error:", err)
 			} else {
@@ -812,8 +824,70 @@ func cliLoop(secretr *Secretr) {
 			} else {
 				fmt.Println("secret copied to clipboard")
 			}
-		case "exit":
-			return
+		case "ssh-key":
+			if len(parts) < 3 || parts[1] != "generate" {
+				fmt.Println("usage: ssh-key generate <name>")
+				continue
+			}
+			name := parts[2]
+			if err := secretr.GenerateSSHKey(name); err != nil {
+				fmt.Println("error:", err)
+			} else {
+				fmt.Println("SSH Key generated successfully:", name)
+			}
+		case "certificate":
+			if len(parts) < 4 || parts[1] != "generate" {
+				fmt.Println("usage: certificate generate <name> <duration>")
+				continue
+			}
+			name := parts[2]
+			duration, err := time.ParseDuration(parts[3] + "d")
+			if err != nil {
+				fmt.Println("error:", err)
+				continue
+			}
+			if err := secretr.GenerateCertificate(name, duration); err != nil {
+				fmt.Println("error:", err)
+			} else {
+				fmt.Println("Certificate generated successfully:", name)
+			}
+		case "sign":
+			if len(parts) < 3 {
+				fmt.Println("usage: sign <key> <data>")
+				continue
+			}
+			key := parts[1]
+			data := parts[2]
+			signature, err := secretr.SignData(key, data)
+			if err != nil {
+				fmt.Println("error:", err)
+			} else {
+				fmt.Println("Signature:", signature)
+			}
+		case "verify":
+			if len(parts) < 4 {
+				fmt.Println("usage: verify <key> <data> <signature>")
+				continue
+			}
+			key := parts[1]
+			data := parts[2]
+			signature := parts[3]
+			valid, err := secretr.VerifySignature(key, data, signature)
+			if err != nil {
+				fmt.Println("error:", err)
+			} else if valid {
+				fmt.Println("Signature is valid.")
+			} else {
+				fmt.Println("Signature is invalid.")
+			}
+		case "hash":
+			if len(parts) < 2 {
+				fmt.Println("usage: hash <data>")
+				continue
+			}
+			data := parts[1]
+			hash := secretr.GenerateHash(data)
+			fmt.Println("Hash:", hash)
 		default:
 			fmt.Println("unknown command")
 		}
@@ -850,4 +924,178 @@ func (v *Secretr) Unmarshal(key string, dest any) error {
 		return err
 	}
 	return json.Unmarshal([]byte(secret), dest)
+}
+
+type GroupedSecrets struct {
+	Application string            `json:"application"`
+	Namespace   string            `json:"namespace"`
+	Secrets     map[string]string `json:"secrets"`
+}
+
+func (v *Secretr) AddGroup(application, namespace string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.initData()
+	groupKey := application + ":" + namespace
+	if _, exists := v.store.Data[groupKey]; exists {
+		return fmt.Errorf("group already exists")
+	}
+	v.store.Data[groupKey] = GroupedSecrets{
+		Application: application,
+		Namespace:   namespace,
+		Secrets:     make(map[string]string),
+	}
+	return v.Save()
+}
+
+func (v *Secretr) AddSecretToGroup(application, namespace, key, value string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.initData()
+	groupKey := application + ":" + namespace
+	group, exists := v.store.Data[groupKey].(GroupedSecrets)
+	if !exists {
+		return fmt.Errorf("group not found")
+	}
+	group.Secrets[key] = value
+	v.store.Data[groupKey] = group
+	return v.Save()
+}
+
+func (v *Secretr) GenerateUniqueSecret(application, namespace string, duration time.Duration) (string, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.initData()
+	secret := fmt.Sprintf("%x", sha256.Sum256([]byte(time.Now().String())))
+	groupKey := application + ":" + namespace
+	group, exists := v.store.Data[groupKey].(GroupedSecrets)
+	if !exists {
+		return "", fmt.Errorf("group not found")
+	}
+	group.Secrets[secret] = time.Now().Add(duration).Format(time.RFC3339)
+	v.store.Data[groupKey] = group
+	return secret, v.Save()
+}
+
+// GenerateSSHKey generates an SSH key pair and stores it.
+func (v *Secretr) GenerateSSHKey(name string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.initData()
+	privateKey, publicKey, err := generateSSHKeyPair()
+	if err != nil {
+		return err
+	}
+	v.store.SSHKeys[name] = privateKey + "\n" + publicKey
+	return v.Save()
+}
+
+// GenerateCertificate generates a self-signed certificate.
+func (v *Secretr) GenerateCertificate(name string, duration time.Duration) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.initData()
+	cert, err := generateSelfSignedCertificate(duration)
+	if err != nil {
+		return err
+	}
+	v.store.Certificates[name] = cert
+	return v.Save()
+}
+
+// SignData signs data using HMAC.
+func (v *Secretr) SignData(key string, data string) (string, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.initData()
+	hmacKey, ok := v.store.Data[key].(string)
+	if !ok {
+		return "", fmt.Errorf("key not found")
+	}
+	return generateHMAC(hmacKey, data), nil
+}
+
+// VerifySignature verifies the HMAC signature.
+func (v *Secretr) VerifySignature(key string, data string, signature string) (bool, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.initData()
+	hmacKey, ok := v.store.Data[key].(string)
+	if !ok {
+		return false, fmt.Errorf("key not found")
+	}
+	return verifyHMAC(hmacKey, data, signature), nil
+}
+
+// GenerateHash generates a hash of the given data.
+func (v *Secretr) GenerateHash(data string) string {
+	return generateHash(data)
+}
+
+// generateSSHKeyPair generates an SSH key pair (private and public keys).
+func generateSSHKeyPair() (string, string, error) {
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate private key: %v", err)
+	}
+	privateKeyBytes, err := x509.MarshalECPrivateKey(privateKey)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal private key: %v", err)
+	}
+	privatePEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privateKeyBytes})
+
+	publicKeyBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal public key: %v", err)
+	}
+	publicPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicKeyBytes})
+
+	return string(privatePEM), string(publicPEM), nil
+}
+
+// generateSelfSignedCertificate generates a self-signed certificate.
+func generateSelfSignedCertificate(duration time.Duration) (string, error) {
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate private key: %v", err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          randSerialNumber(),
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(duration),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+	certBytes, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to create certificate: %v", err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certBytes})
+	return string(certPEM), nil
+}
+
+// generateHMAC generates an HMAC signature for the given data using the provided key.
+func generateHMAC(key, data string) string {
+	h := hmac.New(sha256.New, []byte(key))
+	h.Write([]byte(data))
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// verifyHMAC verifies the HMAC signature for the given data using the provided key.
+func verifyHMAC(key, data, signature string) bool {
+	expected := generateHMAC(key, data)
+	return hmac.Equal([]byte(expected), []byte(signature))
+}
+
+// generateHash generates a SHA-256 hash of the given data.
+func generateHash(data string) string {
+	hash := sha256.Sum256([]byte(data))
+	return fmt.Sprintf("%x", hash)
+}
+
+// randSerialNumber generates a random serial number for certificates.
+func randSerialNumber() *big.Int {
+	serialNumber, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	return serialNumber
 }

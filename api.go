@@ -106,7 +106,7 @@ func StartSecureHTTPServer(v *Secretr) {
 	mux.Handle("/secretr/", authMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		secretrHTTPHandler(v, w, r)
 	}))))
-	
+
 	mux.HandleFunc("/secretr/export", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
@@ -120,7 +120,7 @@ func StartSecureHTTPServer(v *Secretr) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(exp))
 	})
-	
+
 	mux.HandleFunc("/secretr/import", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
@@ -133,7 +133,88 @@ func StartSecureHTTPServer(v *Secretr) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	
+
+	mux.HandleFunc("/secretr/group", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Application string `json:"application"`
+			Namespace   string `json:"namespace"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := v.AddGroup(req.Application, req.Namespace); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	mux.HandleFunc("/secretr/secret", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Application string `json:"application"`
+			Namespace   string `json:"namespace"`
+			Duration    int    `json:"duration"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		secret, err := v.GenerateUniqueSecret(req.Application, req.Namespace, time.Duration(req.Duration)*time.Second)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Write([]byte(secret))
+	})
+
+	mux.HandleFunc("/secretr/ssh-key", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := v.GenerateSSHKey(req.Name); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	mux.HandleFunc("/secretr/certificate", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Name     string `json:"name"`
+			Duration int    `json:"duration"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := v.GenerateCertificate(req.Name, time.Duration(req.Duration)*time.Hour*24); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
 	addr := os.Getenv("SECRETR_ADDR")
 	if addr == "" {
 		addr = ":8080"
@@ -143,7 +224,7 @@ func StartSecureHTTPServer(v *Secretr) {
 		Handler:   mux,
 		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 	}
-	
+
 	go func() {
 		certFile := os.Getenv("SECRETR_CERT")
 		keyFile := os.Getenv("SECRETR_KEY")
@@ -159,7 +240,7 @@ func StartSecureHTTPServer(v *Secretr) {
 			}
 		}
 	}()
-	
+
 	// Gracefully shutdown on termination signal.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
