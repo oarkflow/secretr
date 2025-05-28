@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export CGO_ENABLED=1
 #--------------------------------------------------
 # Configuration (override via env)
 #--------------------------------------------------
 # default platforms & architectures (space-separated)
-PLATFORMS=${PLATFORMS:-"linux darwin windows"}
+PLATFORMS=${PLATFORMS:-"darwin"}
 ARCHS=${ARCHS:-"amd64"}
 # output folder
 OUTDIR=${OUTDIR:-"bin"}
@@ -48,14 +49,44 @@ function build() {
         ./cmd
 
     if [[ "${PACKAGE}" == "true" ]]; then
-        echo "  Packaging ${name}${pkgflag}"
-        pushd "${OUTDIR}" >/dev/null
         if [[ "$os" == "windows" ]]; then
+            echo "  Packaging ${name}${pkgflag}"
+            pushd "${OUTDIR}" >/dev/null
             zip -qr "${name}.zip" "${name}.exe"
+            popd >/dev/null
+        elif [[ "$os" == "darwin" ]]; then
+            local appName="Vault"  # use "Vault" for the app bundle name
+            echo "  Packaging ${appName}.app"
+            # Create .app bundle structure
+            mkdir -p "${OUTDIR}/${appName}.app/Contents/MacOS"
+            mkdir -p "${OUTDIR}/${appName}.app/Contents/Resources"
+            # Copy binary into the app bundle
+            cp "${OUTDIR}/${name}" "${OUTDIR}/${appName}.app/Contents/MacOS/${appName}"
+            # Copy assets (expects an existing ./assets folder)
+            cp -R "./assets/." "${OUTDIR}/${appName}.app/Contents/Resources/"
+            # Create minimal Info.plist
+            cat > "${OUTDIR}/${appName}.app/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>${appName}</string>
+    <key>CFBundleExecutable</key>
+    <string>${appName}</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.example.${appName}</string>
+    <key>CFBundleVersion</key>
+    <string>${VERSION}</string>
+</dict>
+</plist>
+EOF
         else
+            echo "  Packaging ${name}${pkgflag}"
+            pushd "${OUTDIR}" >/dev/null
             tar czf "${name}.tar.gz" "${name}"
+            popd >/dev/null
         fi
-        popd >/dev/null
     fi
 }
 

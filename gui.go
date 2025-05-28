@@ -1,6 +1,7 @@
 package vault
 
 import (
+	_ "embed"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -16,6 +17,9 @@ import (
 
 	"github.com/oarkflow/clipboard"
 )
+
+//go:embed assets/vault.png
+var defaultIcon []byte
 
 type GUI struct {
 	app         fyne.App
@@ -315,10 +319,8 @@ func (g *GUI) deleteKey() {
 func RunGUI() {
 	application := app.New()
 	application.Settings().SetTheme(theme.Current())
-	icon, err := fyne.LoadResourceFromPath("./assets/icon.png")
-	if err == nil {
-		application.SetIcon(icon)
-	}
+	resource := fyne.NewStaticResource("vault.png", defaultIcon)
+	application.SetIcon(resource)
 	gui := NewGUI(application)
 	gui.Run()
 }
