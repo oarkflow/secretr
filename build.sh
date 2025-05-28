@@ -98,9 +98,11 @@ EOF
                 mkdir -p "${STAGING_DIR}/usr/local/bin"
                 cp "${OUTDIR}/${name}" "${STAGING_DIR}/usr/local/bin/Vault"
                 mkdir -p "${STAGING_DIR}/DEBIAN"
+                # Strip leading 'v' from version if present
+                local version="${VERSION#v}"
                 cat > "${STAGING_DIR}/DEBIAN/control" <<EOF
 Package: vault
-Version: ${VERSION}
+Version: ${version}
 Section: utils
 Priority: optional
 Architecture: ${arch}
