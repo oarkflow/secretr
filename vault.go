@@ -1,4 +1,4 @@
-package vault
+package secretr
 
 import (
 	"bufio"
@@ -17,16 +17,16 @@ import (
 	"strings"
 	"sync"
 	"time"
-
+	
 	"golang.org/x/term"
-
+	
 	"github.com/oarkflow/clipboard"
 )
 
 var (
-	vaultDir     = os.Getenv("VAULT_DIR")
-	defaultVault *Vault
-	fingerprint  string
+	secretrDir     = os.Getenv("SECRETR_DIR")
+	defaultSecretr *Secretr
+	fingerprint    string
 )
 
 const (
@@ -35,19 +35,19 @@ const (
 	saltSize          = 16
 )
 
-// initStorage initializes the vault storage directory.
+// initStorage initializes the secretr storage directory.
 func initStorage() error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("Error getting home directory: %v", err)
 	}
-	if vaultDir == "" {
-		vaultDir = filepath.Join(homeDir, ".vault")
+	if secretrDir == "" {
+		secretrDir = filepath.Join(homeDir, ".secretr")
 	}
-	if _, err := os.Stat(vaultDir); os.IsNotExist(err) {
-		err = os.MkdirAll(vaultDir, 0700)
+	if _, err := os.Stat(secretrDir); os.IsNotExist(err) {
+		err = os.MkdirAll(secretrDir, 0700)
 		if err != nil {
-			return fmt.Errorf("Error creating .vault directory: %v", err)
+			return fmt.Errorf("Error creating .secretr directory: %v", err)
 		}
 	}
 	return nil
@@ -77,8 +77,8 @@ func NewPersist() Persist {
 	}
 }
 
-// Vault represents the secret storage with encryption, reset and rate limiting.
-type Vault struct {
+// Secretr represents the secret storage with encryption, reset and rate limiting.
+type Secretr struct {
 	store     Persist
 	masterKey []byte
 	salt      []byte
@@ -91,12 +91,12 @@ type Vault struct {
 }
 
 // Added method to set GUI prompt override.
-func (v *Vault) SetPrompt(prompt func() error) {
+func (v *Secretr) SetPrompt(prompt func() error) {
 	v.promptFunc = prompt
 }
 
 // InitCipher initializes the AES-GCM cipher with the provided password and salt.
-func (v *Vault) InitCipher(pw []byte, salt []byte) {
+func (v *Secretr) InitCipher(pw []byte, salt []byte) {
 	if salt == nil {
 		salt = make([]byte, saltSize)
 		rand.Read(salt)
@@ -116,7 +116,7 @@ func (v *Vault) InitCipher(pw []byte, salt []byte) {
 	v.nonceSize = gcm.NonceSize()
 }
 
-func (v *Vault) Store() Persist {
+func (v *Secretr) Store() Persist {
 	return v.store
 }
 
@@ -124,7 +124,7 @@ func SaltSize() int {
 	return saltSize
 }
 
-// init initializes the vault by setting up storage.
+// init initializes the secretr by setting up storage.
 func init() {
 	var err error
 	fingerprint, err = GetDeviceFingerPrint()
@@ -134,69 +134,69 @@ func init() {
 	if err := initStorage(); err != nil {
 		log.Fatal(err)
 	}
-	defaultVault = New()
+	defaultSecretr = New()
 }
 
-// New creates a new Vault instance.
-func New() *Vault {
-	return &Vault{store: NewPersist()}
+// New creates a new Secretr instance.
+func New() *Secretr {
+	return &Secretr{store: NewPersist()}
 }
 
 func Set(key string, value any) error {
-	if defaultVault == nil {
-		return fmt.Errorf("vault not initialized")
+	if defaultSecretr == nil {
+		return fmt.Errorf("secretr not initialized")
 	}
-	return defaultVault.Set(key, value)
+	return defaultSecretr.Set(key, value)
 }
 
 func Copy(key string) error {
-	if defaultVault == nil {
-		return fmt.Errorf("vault not initialized")
+	if defaultSecretr == nil {
+		return fmt.Errorf("secretr not initialized")
 	}
-	return defaultVault.Copy(key)
+	return defaultSecretr.Copy(key)
 }
 
 func Delete(key string) error {
-	if defaultVault == nil {
-		return fmt.Errorf("vault not initialized")
+	if defaultSecretr == nil {
+		return fmt.Errorf("secretr not initialized")
 	}
-	return defaultVault.Delete(key)
+	return defaultSecretr.Delete(key)
 }
 
 // Get retrieves the value associated with the provided key.
 func Get(key string) (string, error) {
-	if defaultVault == nil {
-		return "", fmt.Errorf("vault not initialized")
+	if defaultSecretr == nil {
+		return "", fmt.Errorf("secretr not initialized")
 	}
-	return defaultVault.Get(key)
+	return defaultSecretr.Get(key)
 }
 
 func Unmarshal(key string, dest any) error {
-	if defaultVault == nil {
-		return fmt.Errorf("vault not initialized")
+	if defaultSecretr == nil {
+		return fmt.Errorf("secretr not initialized")
 	}
-	return defaultVault.Unmarshal(key, dest)
+	return defaultSecretr.Unmarshal(key, dest)
 }
 
-// LoadFromEnv loads environment variables into the vault.
+// LoadFromEnv loads environment variables into the secretr.
 func LoadFromEnv() {
-	if defaultVault == nil {
-		log.Fatal("vault not initialized")
+	if defaultSecretr == nil {
+		log.Fatal("secretr not initialized")
 	}
-	defaultVault.LoadFromEnv()
+	defaultSecretr.LoadFromEnv()
 }
 
-// FilePath returns the path of the vault storage file.
+// FilePath returns the path of the secretr storage file.
 func FilePath() string {
-	return filepath.Join(vaultDir, storageFile)
+	return filepath.Join(secretrDir, storageFile)
 }
 
-// promptMaster prompts for the MasterKey and initializes the vault accordingly.
-func (v *Vault) PromptMaster() error {
+// promptMaster prompts for the MasterKey and initializes the secretr accordingly.
+func (v *Secretr) PromptMaster() error {
 	if time.Since(v.authedAt) < authCacheDuration && v.cipherGCM != nil {
 		return nil
 	}
-
+	
 	// Call the custom GUI prompt if set.
 	if v.promptFunc != nil {
 		err := v.promptFunc()
@@ -205,11 +205,11 @@ func (v *Vault) PromptMaster() error {
 		}
 		return err
 	}
-
-	// Use VAULT_MASTERKEY from the environment if set.
-	if envKey := os.Getenv("VAULT_MASTERKEY"); envKey != "" {
+	
+	// Use SECRETR_MASTERKEY from the environment if set.
+	if envKey := os.Getenv("SECRETR_MASTERKEY"); envKey != "" {
 		if _, err := os.Stat(FilePath()); os.IsNotExist(err) {
-			// Vault file doesn't exist; create new vault using env MasterKey.
+			// Secretr file doesn't exist; create new secretr using env MasterKey.
 			v.InitCipher([]byte(envKey), nil)
 			v.store.DeviceFingerprint = fingerprint
 			if err := v.Save(); err != nil {
@@ -218,7 +218,7 @@ func (v *Vault) PromptMaster() error {
 			v.authedAt = time.Now()
 			return nil
 		} else {
-			// Vault file exists; retrieve its salt.
+			// Secretr file exists; retrieve its salt.
 			enc, err := os.ReadFile(FilePath())
 			if err != nil {
 				return err
@@ -228,7 +228,7 @@ func (v *Vault) PromptMaster() error {
 				return err
 			}
 			if len(decoded) < saltSize {
-				return fmt.Errorf("corrupt vault file")
+				return fmt.Errorf("corrupt secretr file")
 			}
 			salt := decoded[:saltSize]
 			v.InitCipher([]byte(envKey), salt)
@@ -236,11 +236,11 @@ func (v *Vault) PromptMaster() error {
 				v.authedAt = time.Now()
 				return nil
 			} else {
-				fmt.Println("MasterKey from VAULT_MASTERKEY is invalid.")
+				fmt.Println("MasterKey from SECRETR_MASTERKEY is invalid.")
 			}
 		}
 	}
-
+	
 	if v.store.EnableReset && ((!v.store.BannedUntil.IsZero() && time.Now().Before(v.store.BannedUntil)) || v.store.LockedForever) {
 		if err := v.forceReset(); err != nil {
 			return err
@@ -248,17 +248,17 @@ func (v *Vault) PromptMaster() error {
 		v.authedAt = time.Now()
 		return nil
 	}
-
+	
 	if v.store.LockedForever {
-		return fmt.Errorf("vault locked permanently")
+		return fmt.Errorf("secretr locked permanently")
 	}
 	if !v.store.BannedUntil.IsZero() && time.Now().Before(v.store.BannedUntil) {
-		return fmt.Errorf("vault banned until %v", v.store.BannedUntil.Format(time.DateTime))
+		return fmt.Errorf("secretr banned until %v", v.store.BannedUntil.Format(time.DateTime))
 	}
-
+	
 	if _, err := os.Stat(FilePath()); os.IsNotExist(err) {
 		for {
-			fmt.Println("Vault database not found. Setting up a new vault.")
+			fmt.Println("Secretr database not found. Setting up a new secretr.")
 			fmt.Print("Enter new MasterKey: ")
 			pw1, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Println()
@@ -275,7 +275,7 @@ func (v *Vault) PromptMaster() error {
 				fmt.Println("MasterKeys do not match. Try again.")
 				continue
 			}
-
+			
 			v.InitCipher(pw1, nil)
 			v.store.DeviceFingerprint = fingerprint
 			fmt.Print("Enable Reset Password? (y/N): ")
@@ -303,7 +303,7 @@ func (v *Vault) PromptMaster() error {
 			return err
 		}
 		if len(decoded) < saltSize {
-			return fmt.Errorf("corrupt vault file")
+			return fmt.Errorf("corrupt secretr file")
 		}
 		salt := decoded[:saltSize]
 		for {
@@ -333,9 +333,9 @@ func (v *Vault) PromptMaster() error {
 						continue
 					} else {
 						v.store.BannedUntil = time.Now().Add(10 * time.Minute)
-						fmt.Printf("Too many attempts. Vault is banned until %v.\n", v.store.BannedUntil.Format(time.DateTime))
+						fmt.Printf("Too many attempts. Secretr is banned until %v.\n", v.store.BannedUntil.Format(time.DateTime))
 						v.Save()
-						return fmt.Errorf("failed to authenticate: vault banned until %v", v.store.BannedUntil)
+						return fmt.Errorf("failed to authenticate: secretr banned until %v", v.store.BannedUntil)
 					}
 				}
 				continue
@@ -349,13 +349,13 @@ func (v *Vault) PromptMaster() error {
 
 // sendResetEmail now supports SMTP and AWS SES.
 func sendResetEmail(code string) {
-	emailService := os.Getenv("VAULT_EMAIL_SERVICE")
-	resetEmail := os.Getenv("VAULT_RESET_EMAIL")
+	emailService := os.Getenv("SECRETR_EMAIL_SERVICE")
+	resetEmail := os.Getenv("SECRETR_RESET_EMAIL")
 	if emailService == "smtp" {
-		smtpServer := os.Getenv("VAULT_SMTP_SERVER")
-		smtpPort := os.Getenv("VAULT_SMTP_PORT")
-		smtpUser := os.Getenv("VAULT_SMTP_USER")
-		smtpPass := os.Getenv("VAULT_SMTP_PASS")
+		smtpServer := os.Getenv("SECRETR_SMTP_SERVER")
+		smtpPort := os.Getenv("SECRETR_SMTP_PORT")
+		smtpUser := os.Getenv("SECRETR_SMTP_USER")
+		smtpPass := os.Getenv("SECRETR_SMTP_PASS")
 		if smtpServer == "" || smtpPort == "" || smtpUser == "" || smtpPass == "" || resetEmail == "" {
 			fmt.Println("SMTP details missing. Reset code:", code)
 			return
@@ -379,13 +379,13 @@ func sendResetEmail(code string) {
 }
 
 // forceReset forces the reset flow using a reset code.
-func (v *Vault) forceReset() error {
+func (v *Secretr) forceReset() error {
 	if v.store.ResetCode == "" {
 		var num int64
 		binary.Read(rand.Reader, binary.BigEndian, &num)
 		v.store.ResetCode = fmt.Sprintf("%06d", num%1000000)
 		sendResetEmail(v.store.ResetCode)
-		fmt.Println("Vault is banned/locked. Reset code has been sent to your email.")
+		fmt.Println("Secretr is banned/locked. Reset code has been sent to your email.")
 	}
 	for {
 		fmt.Print("Enter reset code: ")
@@ -396,7 +396,7 @@ func (v *Vault) forceReset() error {
 			fmt.Println("Incorrect reset code.")
 			continue
 		}
-
+		
 		for {
 			fmt.Print("Enter new MasterKey: ")
 			new1, err := term.ReadPassword(int(os.Stdin.Fd()))
@@ -425,8 +425,8 @@ func (v *Vault) forceReset() error {
 	}
 }
 
-// Load decrypts and loads the vault data from disk.
-func (v *Vault) Load() error {
+// Load decrypts and loads the secretr data from disk.
+func (v *Secretr) Load() error {
 	enc, err := os.ReadFile(FilePath())
 	if err != nil {
 		return err
@@ -436,37 +436,37 @@ func (v *Vault) Load() error {
 		return err
 	}
 	if len(decoded) < saltSize+v.nonceSize {
-		return fmt.Errorf("corrupt vault file")
+		return fmt.Errorf("corrupt secretr file")
 	}
-
+	
 	data := decoded[saltSize:]
 	nonce := data[:v.nonceSize]
 	ciphertext := data[v.nonceSize:]
 	plain, err := v.cipherGCM.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return fmt.Errorf("Invalid MasterKey or corrupt vault file: %v", err)
+		return fmt.Errorf("Invalid MasterKey or corrupt secretr file: %v", err)
 	}
-
+	
 	var persist Persist
 	if err := json.Unmarshal(plain, &persist); err != nil {
 		return err
 	}
 	v.store = persist
-
-	// If device fingerprint is present in the vault, verify it
+	
+	// If device fingerprint is present in the secretr, verify it
 	if v.store.DeviceFingerprint != "" {
 		if v.store.DeviceFingerprint != fingerprint {
-			return fmt.Errorf("access denied: vault cannot be accessed from this device")
+			return fmt.Errorf("access denied: secretr cannot be accessed from this device")
 		}
 	}
 	if !v.store.BannedUntil.IsZero() && time.Now().Before(v.store.BannedUntil) {
-		return fmt.Errorf("vault banned until %v due to multiple invalid attempts", v.store.BannedUntil.Format(time.DateTime))
+		return fmt.Errorf("secretr banned until %v due to multiple invalid attempts", v.store.BannedUntil.Format(time.DateTime))
 	}
 	return nil
 }
 
-// Save encrypts and saves the vault data to disk.
-func (v *Vault) Save() error {
+// Save encrypts and saves the secretr data to disk.
+func (v *Secretr) Save() error {
 	v.store.DeviceFingerprint = fingerprint
 	plain, err := json.Marshal(v.store)
 	if err != nil {
@@ -475,21 +475,21 @@ func (v *Vault) Save() error {
 	nonce := make([]byte, v.nonceSize)
 	_, _ = io.ReadFull(rand.Reader, nonce)
 	ciphertext := v.cipherGCM.Seal(nonce, nonce, plain, nil)
-
+	
 	final := append(v.salt, ciphertext...)
 	enc := base64.StdEncoding.EncodeToString(final)
 	return os.WriteFile(FilePath(), []byte(enc), 0600)
 }
 
 // Set assigns a secret value to a key.
-func (v *Vault) Set(key string, value any) error {
+func (v *Secretr) Set(key string, value any) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.initData()
 	if err := v.PromptMaster(); err != nil {
 		return err
 	}
-
+	
 	if strings.Contains(key, ".") {
 		parts := strings.Split(key, ".")
 		base := parts[0]
@@ -551,7 +551,7 @@ func (v *Vault) Set(key string, value any) error {
 }
 
 // Get returns the decrypted secret for a given key.
-func (v *Vault) Get(key string) (string, error) {
+func (v *Secretr) Get(key string) (string, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.initData()
@@ -602,8 +602,8 @@ func (v *Vault) Get(key string) (string, error) {
 	}
 }
 
-// Delete removes a secret from the vault.
-func (v *Vault) Delete(key string) error {
+// Delete removes a secret from the secretr.
+func (v *Secretr) Delete(key string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.initData()
@@ -641,7 +641,7 @@ func (v *Vault) Delete(key string) error {
 	} else {
 		delete(v.store.Data, key)
 	}
-
+	
 	err := v.Save()
 	if err == nil {
 		LogAudit("delete", key, "deleted", v.masterKey)
@@ -650,7 +650,7 @@ func (v *Vault) Delete(key string) error {
 }
 
 // Copy copies a secret to the clipboard.
-func (v *Vault) Copy(key string) error {
+func (v *Secretr) Copy(key string) error {
 	val, err := v.Get(key)
 	if err != nil {
 		return err
@@ -659,8 +659,8 @@ func (v *Vault) Copy(key string) error {
 }
 
 // Env sets a secret as an environment variable.
-func (v *Vault) Env(key string) error {
-
+func (v *Secretr) Env(key string) error {
+	
 	secret, err := v.Get(key)
 	if err != nil {
 		return err
@@ -668,8 +668,8 @@ func (v *Vault) Env(key string) error {
 	return os.Setenv(key, secret)
 }
 
-// EnrichEnv sets all vault keys as environment variables.
-func (v *Vault) EnrichEnv() error {
+// EnrichEnv sets all secretr keys as environment variables.
+func (v *Secretr) EnrichEnv() error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	for k, val := range v.store.Data {
@@ -693,26 +693,26 @@ func (v *Vault) EnrichEnv() error {
 	return nil
 }
 
-// initData initializes the vault data map if it's nil.
-func (v *Vault) initData() {
+// initData initializes the secretr data map if it's nil.
+func (v *Secretr) initData() {
 	if v.store.Data == nil {
 		v.store.Data = make(map[string]any)
 	}
 }
 
-// Execute runs the vault CLI loop.
+// Execute runs the secretr CLI loop.
 func Execute() {
-	vault := New()
-	err := vault.PromptMaster()
+	secretr := New()
+	err := secretr.PromptMaster()
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
-	cliLoop(vault)
+	cliLoop(secretr)
 }
 
-// LoadFromEnv loads environment variables into the vault.
-func (v *Vault) LoadFromEnv() {
+// LoadFromEnv loads environment variables into the secretr.
+func (v *Secretr) LoadFromEnv() {
 	envs := os.Environ()
 	for _, e := range envs {
 		parts := strings.SplitN(e, "=", 2)
@@ -729,10 +729,10 @@ func (v *Vault) LoadFromEnv() {
 }
 
 // cliLoop handles the interactive CLI commands.
-func cliLoop(vault *Vault) {
+func cliLoop(secretr *Secretr) {
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
-		fmt.Print("vault> ")
+		fmt.Print("secretr> ")
 		if !scanner.Scan() {
 			break
 		}
@@ -740,23 +740,23 @@ func cliLoop(vault *Vault) {
 		if len(parts) > 0 {
 			cmd := strings.ToLower(parts[0])
 			if cmd == "exit" || cmd == "quit" {
-				vault.Save()
-				fmt.Println("Exiting vault CLI.")
+				secretr.Save()
+				fmt.Println("Exiting secretr CLI.")
 				clipboard.WriteAll("")
 				return
 			}
 			if cmd == "list" {
-				keys := vault.List()
+				keys := secretr.List()
 				for _, k := range keys {
 					fmt.Println(k)
 				}
 				continue
 			}
 			if cmd == "enrich" {
-				if err := vault.EnrichEnv(); err != nil {
+				if err := secretr.EnrichEnv(); err != nil {
 					fmt.Println("error:", err)
 				} else {
-					fmt.Println("Vault secrets enriched into environment variables.")
+					fmt.Println("Secretr secrets enriched into environment variables.")
 				}
 				continue
 			}
@@ -775,39 +775,39 @@ func cliLoop(vault *Vault) {
 				value := splits[1]
 				// Warn user about insecure inline secrets.
 				fmt.Println("WARNING: Providing secrets in command line is insecure.")
-				if err := vault.Set(key, value); err != nil {
+				if err := secretr.Set(key, value); err != nil {
 					fmt.Println("error:", err)
 				}
 			} else {
 				fmt.Print("Enter secret: ")
 				pw, _ := term.ReadPassword(int(os.Stdin.Fd()))
 				fmt.Println()
-				if err := vault.Set(key, string(pw)); err != nil {
+				if err := secretr.Set(key, string(pw)); err != nil {
 					fmt.Println("error:", err)
 				}
 			}
 		case "get":
-			val, err := vault.Get(key)
+			val, err := secretr.Get(key)
 			if err != nil {
 				fmt.Println("error:", err)
 			} else {
 				fmt.Println(val)
 			}
 		case "delete":
-			if err := vault.Delete(key); err != nil {
+			if err := secretr.Delete(key); err != nil {
 				fmt.Println("error:", err)
 			}
 		case "env":
-
-			if err := vault.Env(key); err != nil {
+			
+			if err := secretr.Env(key); err != nil {
 				fmt.Println("error:", err)
 			} else {
 				fmt.Println("Environment variable set:", key)
 			}
 		case "load-env":
-			vault.LoadFromEnv()
+			secretr.LoadFromEnv()
 		case "copy":
-			if err := vault.Copy(key); err != nil {
+			if err := secretr.Copy(key); err != nil {
 				fmt.Println("error:", err)
 			} else {
 				fmt.Println("secret copied to clipboard")
@@ -820,8 +820,8 @@ func cliLoop(vault *Vault) {
 	}
 }
 
-// List returns a flattened list of keys stored in the vault.
-func (v *Vault) List() []string {
+// List returns a flattened list of keys stored in the secretr.
+func (v *Secretr) List() []string {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	var keys []string
@@ -843,8 +843,8 @@ func flattenKeys(data map[string]any, prefix string, keys *[]string) {
 	}
 }
 
-// Unmarshal method to Vault.
-func (v *Vault) Unmarshal(key string, dest any) error {
+// Unmarshal method to Secretr.
+func (v *Secretr) Unmarshal(key string, dest any) error {
 	secret, err := v.Get(key)
 	if err != nil {
 		return err

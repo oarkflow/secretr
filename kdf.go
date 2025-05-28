@@ -1,4 +1,4 @@
-package vault
+package secretr
 
 import (
 	"golang.org/x/crypto/argon2"

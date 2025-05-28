@@ -1,4 +1,4 @@
-package vault
+package secretr
 
 import (
 	"crypto/sha256"

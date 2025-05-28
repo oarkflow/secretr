@@ -1,8 +1,8 @@
-project_name: vault
+project_name: secretr
 
 builds:
   - main: ./cmd/main.go
-    binary: vault
+    binary: secretr
     goos:
       - linux
       - darwin
@@ -31,27 +31,27 @@ nfpms:
     formats:
       - deb
     files:
-      - src: vault
-        dst: /usr/local/bin/vault
+      - src: secretr
+        dst: /usr/local/bin/secretr
     info:
-      name: vault
+      name: secretr
       arch: amd64
       maintainer: "Your Name <you@example.com>"
-      description: "Secret vault application"
+      description: "Secret application"
   - id: rpm
     packager: rpm
     formats:
       - rpm
     files:
-      - src: vault
-        dst: /usr/local/bin/vault
+      - src: secretr
+        dst: /usr/local/bin/secretr
     info:
-      name: vault
+      name: secretr
       arch: amd64
       maintainer: "Your Name <you@example.com>"
-      description: "Secret vault application"
+      description: "Secret application"
 
 release:
   github:
     owner: your-github-username
-    name: vault
+    name: secretr

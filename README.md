@@ -1,14 +1,14 @@
-# Vault
+# Secretr
 
-Vault is a secure secret management tool implemented in Go. It provides encrypted storage, secure access, backup/restore features, and CLI/API interfaces to manage secrets.
+Secretr is a secure secret management tool implemented in Go. It provides encrypted storage, secure access, backup/restore features, and CLI/API interfaces to manage secrets.
 
 ## Features
 
 - **Encryption & Security:**  
   Uses AES-GCM with a master key derived via Argon2id.  
-  Device fingerprinting prevents vault access even if copied to another device.  
+  Device fingerprinting prevents secretr access even if copied to another device.  
 - **MasterKey Management:**  
-  - Set up vault with a MasterKey.  
+  - Set up secretr with a MasterKey.  
   - Change or rotate the MasterKey.
   - Reset functionality with emailed reset code if enabled.
 - **Secret CRUD Operations:**  
@@ -17,29 +17,29 @@ Vault is a secure secret management tool implemented in Go. It provides encrypte
   - Delete secrets.
   - List all secret keys.
 - **Environment Integration:**  
-  - Load and enrich environment variables from vault.
+  - Load and enrich environment variables from secretr.
   - Set a single secret as an environment variable.
 - **Backup & Restore:**  
   - Create backup copies via API or CLI.
   - Restore from backup files.
 - **CLI & API:**  
   - Interactive CLI for managing secrets (`set`, `get`, `delete`, `copy`, `env`, `enrich`, `list`).
-  - HTTP endpoints for key management, backup, and restore (see `/vault/backup` and `/vault/restore` endpoints).
+  - HTTP endpoints for key management, backup, and restore (see `/secretr/backup` and `/secretr/restore` endpoints).
 - **Audit Logging:**  
   Writes audit logs with HMAC signatures to ensure tamper detection.
 - **Additional Utilities:**  
   - Copy secret to clipboard.
-  - Import/export vault data (JSON format).
+  - Import/export secretr data (JSON format).
 
 ## Installation
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/oarkflow/vault.git
+   git clone https://github.com/oarkflow/secretr.git
    ```
 2. Build the project:
    ```bash
-   cd vault
+   cd secretr
    go build ./cmd/main.go
    ```
 
@@ -47,7 +47,7 @@ Vault is a secure secret management tool implemented in Go. It provides encrypte
 
 ### Command-line Interface
 
-- **Initialize and execute vault:**
+- **Initialize and execute secretr:**
   ```bash
   ./main
   ```
@@ -57,32 +57,32 @@ Vault is a secure secret management tool implemented in Go. It provides encrypte
   - `delete <key>`: Remove a secret.
   - `copy <key>`: Copy the secret to the clipboard.
   - `env <key>`: Set the secret as an environment variable.
-  - `load-env`: Load all environment variables from the vault.
-  - `enrich`: Enrich the process's environment with all vault secrets.
-  - `list`: Display all keys stored in vault.
+  - `load-env`: Load all environment variables from the secretr.
+  - `enrich`: Enrich the process's environment with all secretr secrets.
+  - `list`: Display all keys stored in secretr.
   - `exit` / `quit`: Save and exit the CLI.
 
 ### API Endpoints
 
-The vault also exposes HTTP endpoints:
+The secretr also exposes HTTP endpoints:
 
 - **List & Retrieve Keys:**
-  - GET `/vault/` or `/vault/keys` to list all keys.
-  - GET `/vault/<key>` to retrieve a specific secret.
+  - GET `/secretr/` or `/secretr/keys` to list all keys.
+  - GET `/secretr/<key>` to retrieve a specific secret.
 - **Add/Update a Secret:**
-  - POST/PUT `/vault/<key>` with the secret in the request body.
+  - POST/PUT `/secretr/<key>` with the secret in the request body.
 - **Delete a Secret:**
-  - DELETE `/vault/<key>`
-- **Clear Vault:**  
-  - PATCH `/vault/clear` to remove all secrets.
+  - DELETE `/secretr/<key>`
+- **Clear Secretr:**  
+  - PATCH `/secretr/clear` to remove all secrets.
 - **Backup & Restore:**
-  - POST `/vault/backup` to create a backup file.
-  - POST `/vault/restore?path=<backup_path>` to restore the vault from a backup file.
+  - POST `/secretr/backup` to create a backup file.
+  - POST `/secretr/restore?path=<backup_path>` to restore the secretr from a backup file.
 
 ## Configuration
 
-- **Vault Directory:**  
-  By default, the vault uses the `.vault` directory in your home folder. You can override this by setting the `VAULT_DIR` environment variable.
+- **Secretr Directory:**  
+  By default, the secretr uses the `.secretr` directory in your home folder. You can override this by setting the `SECRETR_DIR` environment variable.
 - **Reset Password:**  
   During the initial setup, you will have the option to enable reset password functionality.
 
@@ -90,11 +90,11 @@ The vault also exposes HTTP endpoints:
 
 - **CLI Example:**
   ```bash
-  vault> set my.secret
+  secretr> set my.secret
   Enter secret: *************
-  vault> get my.secret
+  secretr> get my.secret
   *************
-  vault> list
+  secretr> list
   my.secret
   ```
 - **Programmatic Usage:**
@@ -102,8 +102,8 @@ The vault also exposes HTTP endpoints:
 
 ## Security Considerations
 
-- Vault encrypts your secrets on disk. Ensure your master key is kept secure.
-- Vault files are bound to the device they were created on using device fingerprinting.
-- Even if a vault file is copied and the master key is known, it cannot be accessed from a different device.
-- Regularly back up your vault using the provided backup commands.
-- Audit logs are stored in the vault directory to track operations.
+- Secretr encrypts your secrets on disk. Ensure your master key is kept secure.
+- Secretr files are bound to the device they were created on using device fingerprinting.
+- Even if a secretr file is copied and the master key is known, it cannot be accessed from a different device.
+- Regularly back up your secretr using the provided backup commands.
+- Audit logs are stored in the secretr directory to track operations.

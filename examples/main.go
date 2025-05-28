@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
-
-	"github.com/oarkflow/vault"
+	
+	"github.com/oarkflow/secretr"
 )
 
 type Aws struct {
@@ -12,22 +12,22 @@ type Aws struct {
 	Secret string `json:"secret,omitempty"`
 }
 
-// main demonstrates how to load environment variables from the vault and retrieve secrets.
+// main demonstrates how to load environment variables from the secretr and retrieve secrets.
 func main() {
-	os.Setenv("VAULT_MASTERKEY", "admintest")
-	openAIKey, err := vault.Get("OPENAI_KEY")
+	os.Setenv("SECRETR_MASTERKEY", "admintest")
+	openAIKey, err := secretr.Get("OPENAI_KEY")
 	if err != nil {
 		panic(err)
 	}
-	deepSeekKey, err := vault.Get("DEEPSEEK_KEY")
+	deepSeekKey, err := secretr.Get("DEEPSEEK_KEY")
 	if err != nil {
 		panic(err)
 	}
 	fmt.Println("OPENAI_KEY  =", openAIKey)
 	fmt.Println("DEEPSEEK_KEY =", deepSeekKey)
-
+	
 	var aws Aws
-	err = vault.Unmarshal("aws", &aws)
+	err = secretr.Unmarshal("aws", &aws)
 	if err != nil {
 		panic(err)
 	}

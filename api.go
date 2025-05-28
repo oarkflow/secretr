@@ -1,4 +1,4 @@
-package vault
+package secretr
 
 import (
 	"context"
@@ -24,7 +24,7 @@ var (
 
 // authMiddleware validates the Bearer token provided in the Authorization header.
 func authMiddleware(next http.Handler) http.Handler {
-	token := os.Getenv("VAULT_TOKEN")
+	token := os.Getenv("SECRETR_TOKEN")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
 		if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != token {
@@ -61,9 +61,9 @@ func resetRateLimiter() {
 	}
 }
 
-// vaultHTTPHandler processes HTTP requests for vault operations.
-func vaultHTTPHandler(v *Vault, w http.ResponseWriter, r *http.Request) {
-	key := strings.TrimPrefix(r.URL.Path, "/vault/")
+// secretrHTTPHandler processes HTTP requests for secretr operations.
+func secretrHTTPHandler(v *Secretr, w http.ResponseWriter, r *http.Request) {
+	key := strings.TrimPrefix(r.URL.Path, "/secretr/")
 	switch r.Method {
 	case http.MethodGet:
 		if key == "" || key == "keys" {
@@ -100,19 +100,19 @@ func vaultHTTPHandler(v *Vault, w http.ResponseWriter, r *http.Request) {
 }
 
 // StartSecureHTTPServer initializes and runs an HTTP/HTTPS server with graceful shutdown.
-func StartSecureHTTPServer(v *Vault) {
+func StartSecureHTTPServer(v *Secretr) {
 	mux := http.NewServeMux()
 	// Protect endpoints with auth and rate-limiting middleware.
-	mux.Handle("/vault/", authMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		vaultHTTPHandler(v, w, r)
+	mux.Handle("/secretr/", authMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secretrHTTPHandler(v, w, r)
 	}))))
-
-	mux.HandleFunc("/vault/export", func(w http.ResponseWriter, r *http.Request) {
+	
+	mux.HandleFunc("/secretr/export", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		exp, err := ExportVault(v)
+		exp, err := ExportSecretr(v)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -120,21 +120,21 @@ func StartSecureHTTPServer(v *Vault) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(exp))
 	})
-
-	mux.HandleFunc("/vault/import", func(w http.ResponseWriter, r *http.Request) {
+	
+	mux.HandleFunc("/secretr/import", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		body, _ := io.ReadAll(r.Body)
-		if err := ImportVault(v, string(body)); err != nil {
+		if err := ImportSecretr(v, string(body)); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-
-	addr := os.Getenv("VAULT_ADDR")
+	
+	addr := os.Getenv("SECRETR_ADDR")
 	if addr == "" {
 		addr = ":8080"
 	}
@@ -143,10 +143,10 @@ func StartSecureHTTPServer(v *Vault) {
 		Handler:   mux,
 		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 	}
-
+	
 	go func() {
-		certFile := os.Getenv("VAULT_CERT")
-		keyFile := os.Getenv("VAULT_KEY")
+		certFile := os.Getenv("SECRETR_CERT")
+		keyFile := os.Getenv("SECRETR_KEY")
 		if certFile != "" && keyFile != "" {
 			log.Println("Starting HTTPS server on", addr)
 			if err := server.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
@@ -159,7 +159,7 @@ func StartSecureHTTPServer(v *Vault) {
 			}
 		}
 	}()
-
+	
 	// Gracefully shutdown on termination signal.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

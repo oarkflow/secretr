@@ -2,19 +2,19 @@ package main
 
 import (
 	"flag"
-
-	"github.com/oarkflow/vault"
+	
+	"github.com/oarkflow/secretr"
 )
 
-// main is the entry point for the vault CLI application.
+// main is the entry point for the secretr CLI application.
 func main() {
 	guiFlag := flag.Bool("gui", true, "Run in GUI mode")
 	flag.Parse()
-
+	
 	if *guiFlag {
-		vault.RunGUI()
+		secretr.RunGUI()
 		return
 	}
-
-	vault.Execute()
+	
+	secretr.Execute()
 }

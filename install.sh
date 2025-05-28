@@ -28,12 +28,12 @@ else
     exit 1
 fi
 
-BINARY_NAME="vault-${OS}-${ARCH}"
+BINARY_NAME="secretr-${OS}-${ARCH}"
 
 #--------------------------------------------------
 # Define Base URL and download URL (update BASE_URL accordingly)
 #--------------------------------------------------
-BASE_URL="https://example.com/vault"  # change to your build hosting URL
+BASE_URL="https://example.com/secretr"  # change to your build hosting URL
 DOWNLOAD_URL="${BASE_URL}/${BINARY_NAME}.${PACKAGE_EXT}"
 
 #--------------------------------------------------
@@ -73,8 +73,8 @@ fi
 # Install the executable
 #--------------------------------------------------
 if [[ "$OS" != "windows" ]]; then
-    echo "Installing vault to /usr/local/bin (sudo may be required)"
-    sudo install -m 755 "$EXE" /usr/local/bin/vault
+    echo "Installing secretr to /usr/local/bin (sudo may be required)"
+    sudo install -m 755 "$EXE" /usr/local/bin/secretr
 else
     echo "For Windows, please move ${EXE} to a folder in your PATH."
 fi
@@ -83,50 +83,50 @@ fi
 # Create Desktop/Icon shortcut as applicable
 #--------------------------------------------------
 if [[ "$OS" == "linux" ]]; then
-    DESKTOP_FILE="$HOME/.local/share/applications/vault.desktop"
+    DESKTOP_FILE="$HOME/.local/share/applications/secretr.desktop"
     echo "Creating desktop entry at ${DESKTOP_FILE}"
     mkdir -p "$(dirname "$DESKTOP_FILE")"
     cat > "$DESKTOP_FILE" <<EOF
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Vault
-Exec=/usr/local/bin/vault
-Icon=${TMP_DIR}/vault.png
+Name=Secretr
+Exec=/usr/local/bin/secretr
+Icon=${TMP_DIR}/secretr.png
 Terminal=false
 EOF
-    # Download icon from assets directory "vault.png"
-    ICON_URL="${BASE_URL}/assets/vault.png"
-    if curl -fLo "${TMP_DIR}/vault.png" "$ICON_URL"; then
+    # Download icon from assets directory "secretr.png"
+    ICON_URL="${BASE_URL}/assets/secretr.png"
+    if curl -fLo "${TMP_DIR}/secretr.png" "$ICON_URL"; then
         echo "Icon downloaded successfully."
     else
         echo "Warning: Icon download failed."
     fi
 elif [[ "$OS" == "darwin" ]]; then
-    echo "Installing vault to /Applications/Vault.app"
+    echo "Installing secretr to /Applications/Secretr.app"
     # Optionally install binary to /usr/local/bin for terminal usage
-    sudo install -m 755 "$EXE" /usr/local/bin/vault
-    APP_BUNDLE="/Applications/Vault.app"
+    sudo install -m 755 "$EXE" /usr/local/bin/secretr
+    APP_BUNDLE="/Applications/Secretr.app"
     mkdir -p "${APP_BUNDLE}/Contents/MacOS"
     mkdir -p "${APP_BUNDLE}/Contents/Resources"
-    cp "$EXE" "${APP_BUNDLE}/Contents/MacOS/Vault"
+    cp "$EXE" "${APP_BUNDLE}/Contents/MacOS/Secretr"
     cat > "${APP_BUNDLE}/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Vault</string>
+    <string>Secretr</string>
     <key>CFBundleExecutable</key>
-    <string>Vault</string>
+    <string>Secretr</string>
     <key>CFBundleIdentifier</key>
-    <string>com.example.Vault</string>
+    <string>com.example.Secretr</string>
     <key>CFBundleVersion</key>
     <string>1.0</string>
 </dict>
 </plist>
 EOF
-    echo "Vault.app created at ${APP_BUNDLE}"
+    echo "Secretr.app created at ${APP_BUNDLE}"
 else
     echo "For Windows, please move ${EXE} to a folder in your PATH."
 fi

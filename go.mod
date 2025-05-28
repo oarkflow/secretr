@@ -1,4 +1,4 @@
-module github.com/oarkflow/vault
+module github.com/oarkflow/secretr
 
 go 1.24.2
 

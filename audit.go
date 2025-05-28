@@ -1,4 +1,4 @@
-package vault
+package secretr
 
 import (
 	"crypto/hmac"
@@ -18,7 +18,7 @@ func LogAudit(operation, key, details string, masterKey []byte) {
 	auditMu.Lock()
 	defer auditMu.Unlock()
 	// Use a daily rotated log file.
-	auditPath := filepath.Join(vaultDir, fmt.Sprintf("audit-%s.log", time.Now().Format("2006-01-02")))
+	auditPath := filepath.Join(secretrDir, fmt.Sprintf("audit-%s.log", time.Now().Format("2006-01-02")))
 	f, err := os.OpenFile(auditPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return

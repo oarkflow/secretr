@@ -81,7 +81,7 @@ jobs:
           restore-keys: |
             go-mod-${{ runner.os }}-v3-
 
-      - name: Build vault for ${{ matrix.goos }}/${{ matrix.goarch }}
+      - name: Build secretr for ${{ matrix.goos }}/${{ matrix.goarch }}
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
@@ -91,12 +91,12 @@ jobs:
           if [ "${{ matrix.goos }}" = "windows" ]; then
             ext=".exe"
           fi
-          go build -v -o vault-${{ matrix.goos }}-${{ matrix.goarch }}${ext} ./cmd
+          go build -v -o secretr-${{ matrix.goos }}-${{ matrix.goarch }}${ext} ./cmd
 
       - name: Publish binaries to GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            vault-*-*
+            secretr-*-*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

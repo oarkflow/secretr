@@ -1,4 +1,4 @@
-package vault
+package secretr
 
 import (
 	_ "embed"
@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
-
+	
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
@@ -14,17 +14,17 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-
+	
 	"github.com/oarkflow/clipboard"
 )
 
-//go:embed assets/vault.png
+//go:embed assets/secretr.png
 var defaultIcon []byte
 
 type GUI struct {
 	app         fyne.App
 	mainWindow  fyne.Window
-	vault       *Vault
+	secretr     *Secretr
 	keyList     *widget.List
 	search      *widget.Entry
 	content     *widget.Entry
@@ -35,8 +35,8 @@ type GUI struct {
 
 func NewGUI(a fyne.App) *GUI {
 	return &GUI{
-		app:   a,
-		vault: New(),
+		app:     a,
+		secretr: New(),
 	}
 }
 
@@ -62,7 +62,7 @@ func showConfirmWithEnter(parent fyne.Window, title string, message string, call
 }
 
 func (g *GUI) showLogin() {
-	window := g.app.NewWindow("Vault Login")
+	window := g.app.NewWindow("Secretr Login")
 	window.Resize(fyne.NewSize(400, 200))
 	// Center the window on screen.
 	window.CenterOnScreen()
@@ -78,7 +78,7 @@ func (g *GUI) showLogin() {
 			{Widget: password},
 		},
 		OnSubmit: func() {
-			g.vault.SetPrompt(func() error {
+			g.secretr.SetPrompt(func() error {
 				enc, err := os.ReadFile(FilePath())
 				if err != nil {
 					return err
@@ -88,21 +88,21 @@ func (g *GUI) showLogin() {
 					return err
 				}
 				if len(decoded) < SaltSize() {
-					return fmt.Errorf("corrupt vault file")
+					return fmt.Errorf("corrupt secretr file")
 				}
 				salt := decoded[:SaltSize()]
-				g.vault.InitCipher([]byte(password.Text), salt)
-				return g.vault.Load()
+				g.secretr.InitCipher([]byte(password.Text), salt)
+				return g.secretr.Load()
 			})
-			err := g.vault.PromptMaster()
+			err := g.secretr.PromptMaster()
 			if err != nil {
 				if strings.Contains(err.Error(), "no such file") {
-					showConfirmWithEnter(window, "Vault Not Found",
-						"Vault file does not exist. Create new one using this Master Password?",
+					showConfirmWithEnter(window, "Secretr Not Found",
+						"Secretr file does not exist. Create new one using this Master Password?",
 						func(ok bool) {
 							if ok {
-								g.vault.InitCipher([]byte(password.Text), nil)
-								if err := g.vault.Save(); err != nil {
+								g.secretr.InitCipher([]byte(password.Text), nil)
+								if err := g.secretr.Save(); err != nil {
 									dialog.ShowError(err, window)
 									return
 								}
@@ -133,7 +133,7 @@ func (g *GUI) showLogin() {
 }
 
 func (g *GUI) showMain() {
-	g.mainWindow = g.app.NewWindow("Secret Vault")
+	g.mainWindow = g.app.NewWindow("Secret Manager")
 	g.mainWindow.Resize(fyne.NewSize(800, 600))
 	// Center the window on screen.
 	g.mainWindow.CenterOnScreen()
@@ -158,7 +158,7 @@ func (g *GUI) showMain() {
 			row := obj.(*fyne.Container)
 			label := row.Objects[1].(*widget.Label)
 			btn := row.Objects[3].(*widget.Button)
-
+			
 			key := g.keyData[id]
 			label.SetText(key)
 			btn.OnTapped = func() {
@@ -175,7 +175,7 @@ func (g *GUI) showMain() {
 			dialog.ShowInformation("Info", "Select a key before copying", g.mainWindow)
 			return
 		}
-		secret, err := g.vault.Get(g.currentKey)
+		secret, err := g.secretr.Get(g.currentKey)
 		if err != nil {
 			dialog.ShowError(err, g.mainWindow)
 			return
@@ -215,7 +215,7 @@ func (g *GUI) showMain() {
 }
 
 func (g *GUI) refreshKeys() {
-	g.fullKeyData = g.vault.List()
+	g.fullKeyData = g.secretr.List()
 	g.filterKeys(g.search.Text)
 }
 
@@ -242,7 +242,7 @@ func (g *GUI) showKeyDetails(id widget.ListItemID) {
 }
 
 func (g *GUI) revealSecret() {
-	secret, err := g.vault.Get(g.currentKey)
+	secret, err := g.secretr.Get(g.currentKey)
 	if err != nil {
 		dialog.ShowError(err, g.mainWindow)
 		return
@@ -262,7 +262,7 @@ func (g *GUI) addKey() {
 			if !ok {
 				return
 			}
-			if err := g.vault.Set(keyEntry.Text, valEntry.Text); err != nil {
+			if err := g.secretr.Set(keyEntry.Text, valEntry.Text); err != nil {
 				dialog.ShowError(err, g.mainWindow)
 				return
 			}
@@ -286,7 +286,7 @@ func (g *GUI) editKey() {
 			if !ok {
 				return
 			}
-			if err := g.vault.Set(g.currentKey, valEntry.Text); err != nil {
+			if err := g.secretr.Set(g.currentKey, valEntry.Text); err != nil {
 				dialog.ShowError(err, g.mainWindow)
 				return
 			}
@@ -306,7 +306,7 @@ func (g *GUI) deleteKey() {
 			if !ok {
 				return
 			}
-			if err := g.vault.Delete(g.currentKey); err != nil {
+			if err := g.secretr.Delete(g.currentKey); err != nil {
 				dialog.ShowError(err, g.mainWindow)
 				return
 			}
@@ -319,7 +319,7 @@ func (g *GUI) deleteKey() {
 func RunGUI() {
 	application := app.New()
 	application.Settings().SetTheme(theme.Current())
-	resource := fyne.NewStaticResource("vault.png", defaultIcon)
+	resource := fyne.NewStaticResource("secretr.png", defaultIcon)
 	application.SetIcon(resource)
 	gui := NewGUI(application)
 	gui.Run()

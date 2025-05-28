@@ -39,7 +39,7 @@ read -r -a ARCHS_ARR <<< "$ARCHS"
 function build() {
     local os=$1
     local arch=$2
-    local name="vault-${os}-${arch}"
+    local name="secretr-${os}-${arch}"
     local ext=""
     local pkgflag=""
     if [[ "$os" == "windows" ]]; then
@@ -65,10 +65,10 @@ function build() {
             pushd "${OUTDIR}" >/dev/null
             zip -qr "${name}.zip" "${name}.exe"
             popd >/dev/null
-            mkdir -p "/c/Program Files/Vault"
-            mv "${OUTDIR}/${name}.zip" "/c/Program Files/Vault/"
+            mkdir -p "/c/Program Files/Secretr"
+            mv "${OUTDIR}/${name}.zip" "/c/Program Files/Secretr/"
         elif [[ "$os" == "darwin" ]]; then
-            local appName="Vault"
+            local appName="Secretr"
             echo "  Packaging ${appName}.app"
             mkdir -p "${OUTDIR}/${appName}.app/Contents/MacOS"
             mkdir -p "${OUTDIR}/${appName}.app/Contents/Resources"
@@ -96,18 +96,18 @@ EOF
                 echo "  Packaging ${name} as deb file"
                 STAGING_DIR=$(mktemp -d)
                 mkdir -p "${STAGING_DIR}/usr/local/bin"
-                cp "${OUTDIR}/${name}" "${STAGING_DIR}/usr/local/bin/Vault"
+                cp "${OUTDIR}/${name}" "${STAGING_DIR}/usr/local/bin/Secretr"
                 mkdir -p "${STAGING_DIR}/DEBIAN"
                 # Strip leading 'v' from version if present
                 local version="${VERSION#v}"
                 cat > "${STAGING_DIR}/DEBIAN/control" <<EOF
-Package: vault
+Package: secretr
 Version: ${version}
 Section: utils
 Priority: optional
 Architecture: ${arch}
 Maintainer: Your Name <you@example.com>
-Description: Vault utility
+Description: Secretr utility
 EOF
                 dpkg-deb --build "${STAGING_DIR}" "${OUTDIR}/${name}.deb"
                 rm -rf "${STAGING_DIR}"
@@ -123,16 +123,16 @@ EOF
                     export PATH="$HOME/.gem/ruby/$(ruby -e 'print RUBY_VERSION')/bin:$PATH"
                 fi
                 # Using fpm to build rpm; fpm should now be installed
-                fpm -s dir -t rpm -n vault -v "${VERSION}" -a "${arch}" -C "${OUTDIR}" --prefix=/usr/local/bin Vault
+                fpm -s dir -t rpm -n secretr -v "${VERSION}" -a "${arch}" -C "${OUTDIR}" --prefix=/usr/local/bin Secretr
             else
                 echo "  Default packaging for Linux"
                 sudo mkdir -p "/usr/local/bin"
-                sudo install -m 755 "${OUTDIR}/${name}" /usr/local/bin/Vault
+                sudo install -m 755 "${OUTDIR}/${name}" /usr/local/bin/Secretr
                 mkdir -p "$HOME/.local/share/applications"
-                cat > "$HOME/.local/share/applications/Vault.desktop" <<EOF
+                cat > "$HOME/.local/share/applications/Secretr.desktop" <<EOF
 [Desktop Entry]
-Name=Vault
-Exec=Vault
+Name=Secretr
+Exec=Secretr
 Icon=${OUTDIR}/${name}.png
 Type=Application
 Categories=Utility;
@@ -150,7 +150,7 @@ EOF
 #--------------------------------------------------
 # Main
 #--------------------------------------------------
-echo "Building vault (version=${VERSION}) for: ${PLATFORMS_ARR[*]} × ${ARCHS_ARR[*]}"
+echo "Building secretr (version=${VERSION}) for: ${PLATFORMS_ARR[*]} × ${ARCHS_ARR[*]}"
 mkdir -p "${OUTDIR}"
 
 for os in "${PLATFORMS_ARR[@]}"; do

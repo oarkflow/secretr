@@ -1,4 +1,4 @@
-package vault
+package secretr
 
 import (
 	"encoding/json"
@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// ExportVault returns a JSON formatted export of the vault data.
-func ExportVault(v *Vault) (string, error) {
+// ExportSecretr returns a JSON formatted export of the secretr data.
+func ExportSecretr(v *Secretr) (string, error) {
 	export := struct {
 		Data      map[string]any `json:"data"`
 		Timestamp time.Time      `json:"timestamp"`
@@ -24,8 +24,8 @@ func ExportVault(v *Vault) (string, error) {
 	return string(b), nil
 }
 
-// ImportVault imports vault data from a JSON string.
-func ImportVault(v *Vault, jsonData string) error {
+// ImportSecretr imports secretr data from a JSON string.
+func ImportSecretr(v *Secretr, jsonData string) error {
 	var imp struct {
 		Data map[string]any `json:"data"`
 	}
@@ -38,11 +38,11 @@ func ImportVault(v *Vault, jsonData string) error {
 	return v.Save()
 }
 
-// BackupVault creates a backup file containing the vault export.
-func BackupVault(v *Vault) error {
-	backupDir := filepath.Join(vaultDir, "backups")
+// BackupSecretr creates a backup file containing the secretr export.
+func BackupSecretr(v *Secretr) error {
+	backupDir := filepath.Join(secretrDir, "backups")
 	os.MkdirAll(backupDir, 0700)
-	exp, err := ExportVault(v)
+	exp, err := ExportSecretr(v)
 	if err != nil {
 		return err
 	}
