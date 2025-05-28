@@ -24,21 +24,18 @@ jobs:
     strategy:
       matrix:
         include:
-          # macOS builds (macOS)
-          - goos: darwin
-            goarch: amd64
-            distro: app
-            runs-on: macos-latest
-
           # Linux builds (Ubuntu)
           - goos: linux
             goarch: amd64
-            distro: deb
             runs-on: ubuntu-latest
-          - goos: linux
+
+          # macOS builds (macOS)
+          - goos: darwin
             goarch: amd64
-            distro: rpm
-            runs-on: ubuntu-latest
+            runs-on: macos-latest
+          - goos: darwin
+            goarch: arm64
+            runs-on: macos-latest
 
           # Windows build (Windows x64 only)
           - goos: windows
@@ -84,20 +81,22 @@ jobs:
           restore-keys: |
             go-mod-${{ runner.os }}-v3-
 
-      - name: Build vault using build.sh
-        run: |
-          chmod +x ./build.sh
-          ./build.sh
+      - name: Build vault for ${{ matrix.goos }}/${{ matrix.goarch }}
         env:
-          PLATFORMS: ${{ matrix.goos }}
-          ARCHS: ${{ matrix.goarch }}
-          PACKAGE: "true"
-          DISTRO: ${{ matrix.distro }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 1
+        run: |
+          ext=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            ext=".exe"
+          fi
+          go build -v -o vault-${{ matrix.goos }}-${{ matrix.goarch }}${ext} ./cmd
 
       - name: Publish binaries to GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            bin/**
+            vault-*-*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
