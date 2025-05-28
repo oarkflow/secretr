@@ -119,7 +119,8 @@ EOF
                         sudo apt-get update
                         sudo apt-get install -y ruby ruby-dev build-essential
                     fi
-                    gem install --no-document fpm
+                    gem install --no-document fpm --user-install
+                    export PATH="$HOME/.gem/ruby/$(ruby -e 'print RUBY_VERSION')/bin:$PATH"
                 fi
                 # Using fpm to build rpm; fpm should now be installed
                 fpm -s dir -t rpm -n vault -v "${VERSION}" -a "${arch}" -C "${OUTDIR}" --prefix=/usr/local/bin Vault
