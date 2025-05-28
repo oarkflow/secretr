@@ -54,6 +54,9 @@ function build() {
             pushd "${OUTDIR}" >/dev/null
             zip -qr "${name}.zip" "${name}.exe"
             popd >/dev/null
+            # Move package to Windows application directory
+            mkdir -p "/c/Program Files/Vault"
+            mv "${OUTDIR}/${name}.zip" "/c/Program Files/Vault/"
         elif [[ "$os" == "darwin" ]]; then
             local appName="Vault"  # use "Vault" for the app bundle name
             echo "  Packaging ${appName}.app"
@@ -80,6 +83,23 @@ function build() {
     <string>${VERSION}</string>
 </dict>
 </plist>
+EOF
+            # Move the .app bundle to the Applications directory
+            mv "${OUTDIR}/${appName}.app" "/Applications/"
+        elif [[ "$os" == "linux" ]]; then
+            echo "  Packaging for Linux"
+            # Copy binary to Linux executables directory
+            mkdir -p "/usr/local/bin"
+            cp "${OUTDIR}/${name}" "/usr/local/bin/Vault"
+            # Create desktop entry
+            mkdir -p "$HOME/.local/share/applications"
+            cat > "$HOME/.local/share/applications/Vault.desktop" <<EOF
+[Desktop Entry]
+Name=Vault
+Exec=Vault
+Icon=${OUTDIR}/${name}.png
+Type=Application
+Categories=Utility;
 EOF
         else
             echo "  Packaging ${name}${pkgflag}"
