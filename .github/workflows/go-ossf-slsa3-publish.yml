@@ -91,7 +91,7 @@ jobs:
           if [ "${{ matrix.goos }}" = "windows" ]; then
             ext=".exe"
           fi
-          go build -v -o secretr-${{ matrix.goos }}-${{ matrix.goarch }}${ext} ./cmd
+          cd gui && go build -v -o secretr-${{ matrix.goos }}-${{ matrix.goarch }}${ext} ./cmd
 
       - name: Publish binaries to GitHub Release
         uses: softprops/action-gh-release@v1
