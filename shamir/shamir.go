@@ -3,6 +3,8 @@ package shamir
 import (
 	"crypto/rand"
 	"errors"
+
+	"github.com/oarkflow/secretr/storage"
 )
 
 // Precomputed tables for GF(256) arithmetic using the polynomial x^8 + x^4 + x^3 + x + 1 (0x11b)
@@ -86,8 +88,10 @@ func Split(secret []byte, t, n int) ([][]byte, error) {
 	// generate coefficients: a_0 = secret byte, a_1..a_{t-1} random
 	shares := make([][]byte, n)
 	for i := range shares {
-		shares[i] = make([]byte, len(secret)+1)
-		shares[i][0] = byte(i + 1) // x coordinate
+		// allocate extra byte for total shares header
+		shares[i] = make([]byte, len(secret)+2)
+		shares[i][0] = byte(i + 1) // share (chunk) index (x coordinate)
+		shares[i][1] = byte(n)     // total shares/chunks
 	}
 	// for each byte in secret, generate polynomial
 	for j := 0; j < len(secret); j++ {
@@ -107,7 +111,7 @@ func Split(secret []byte, t, n int) ([][]byte, error) {
 				powX = mul(powX, x)
 				y = add(y, mul(coeffs[k], powX))
 			}
-			shares[i][j+1] = y
+			shares[i][j+2] = y // changed offset to +2 for header
 		}
 	}
 	return shares, nil
@@ -119,19 +123,23 @@ func Combine(shares [][]byte, t int) ([]byte, error) {
 	if len(shares) < t {
 		return nil, errors.New("shamir: insufficient shares for threshold")
 	}
-	// Use only the first t shares.
 	if len(shares) > t {
 		shares = shares[:t]
 	}
 	n := t
 
-	// all shares must have same length and indices must be nonzero and unique
+	// all shares must have same length and valid header
 	length := len(shares[0])
+	totalSharesHeader := shares[0][1]
 	xs := make([]byte, n)
 	used := make(map[byte]bool)
 	for i, s := range shares {
 		if len(s) != length {
 			return nil, errors.New("shamir: mismatched share lengths")
+		}
+		// Validate total shares header consistency
+		if s[1] != totalSharesHeader {
+			return nil, errors.New("shamir: inconsistent total shares header")
 		}
 		xi := s[0]
 		if xi == 0 {
@@ -168,15 +176,66 @@ func Combine(shares [][]byte, t int) ([]byte, error) {
 		}
 		lags[i] = mul(mul(productAll, invXS), invDenom)
 	}
-	secret := make([]byte, length-1)
-	// For each byte position, apply precomputed Lagrange coefficients
-	for j := 1; j < length; j++ {
+	secret := make([]byte, length-2)
+	// For each byte position in secret part, apply precomputed Lagrange coefficients
+	for j := 2; j < length; j++ {
 		var value byte = 0
 		for i := 0; i < n; i++ {
 			yi := shares[i][j]
 			value = add(value, mul(yi, lags[i]))
 		}
-		secret[j-1] = value
+		secret[j-2] = value
 	}
 	return secret, nil
+}
+
+// StoreShares stores all provided shares into the given storage.
+func StoreShares(shares [][]byte, storage storage.IStorage) error {
+	for _, share := range shares {
+		index := share[0]
+		if err := storage.SetShare(index, share); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RetrieveShares gets shares from storage based on a list of indices.
+func RetrieveShares(indices []byte, storage storage.IStorage) ([][]byte, error) {
+	var shares [][]byte
+	for _, idx := range indices {
+		share, err := storage.GetShare(idx)
+		if err != nil {
+			return nil, err
+		}
+		shares = append(shares, share)
+	}
+	return shares, nil
+}
+
+// MultiPartyAuthorize retrieves shares from storage and combines them if the threshold is met.
+// This enforces that a quorum of custodians must collaborate to reconstruct the secret.
+func MultiPartyAuthorize(storage storage.IStorage, indices []byte, threshold int) ([]byte, error) {
+	shares, err := RetrieveShares(indices, storage)
+	if err != nil {
+		return nil, err
+	}
+	if len(shares) < threshold {
+		return nil, errors.New("shamir: insufficient shares for multi-party authorization")
+	}
+	// Combine using only the first 'threshold' shares if extra are provided.
+	return Combine(shares, threshold)
+}
+
+// BreakGlassRecovery demonstrates recovery using pre-designated "break-glass" shares.
+// In practice, these shares should be stored in entirely separate secure locations.
+func BreakGlassRecovery(storage storage.IStorage, recoveryIndices []byte, threshold int) ([]byte, error) {
+	shares, err := RetrieveShares(recoveryIndices, storage)
+	if err != nil {
+		return nil, err
+	}
+	if len(shares) < threshold {
+		return nil, errors.New("shamir: insufficient recovery shares for break-glass procedure")
+	}
+	return Combine(shares, threshold)
 }
