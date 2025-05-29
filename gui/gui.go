@@ -1,4 +1,4 @@
-package secretr
+package gui
 
 import (
 	_ "embed"
@@ -17,6 +17,8 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/oarkflow/clipboard"
+
+	"github.com/oarkflow/secretr"
 )
 
 //go:embed assets/secretr.png
@@ -25,7 +27,7 @@ var defaultIcon []byte
 type GUI struct {
 	app            fyne.App
 	mainWindow     fyne.Window
-	secretr        *Secretr
+	secretr        *secretr.Secretr
 	keyList        *widget.List
 	search         *widget.Entry
 	content        *widget.Entry
@@ -43,7 +45,7 @@ type GUI struct {
 func NewGUI(a fyne.App) *GUI {
 	return &GUI{
 		app:     a,
-		secretr: New(),
+		secretr: secretr.New(),
 	}
 }
 
@@ -86,7 +88,7 @@ func (g *GUI) showLogin() {
 		},
 		OnSubmit: func() {
 			g.secretr.SetPrompt(func() error {
-				enc, err := os.ReadFile(FilePath())
+				enc, err := os.ReadFile(secretr.FilePath())
 				if err != nil {
 					return err
 				}
@@ -94,10 +96,10 @@ func (g *GUI) showLogin() {
 				if err != nil {
 					return err
 				}
-				if len(decoded) < SaltSize() {
+				if len(decoded) < secretr.SaltSize() {
 					return fmt.Errorf("corrupt secretr file")
 				}
-				salt := decoded[:SaltSize()]
+				salt := decoded[:secretr.SaltSize()]
 				g.secretr.InitCipher([]byte(password.Text), salt)
 				return g.secretr.Load()
 			})
@@ -459,7 +461,7 @@ func (g *GUI) editKey() {
 					return
 				}
 				// Save as SSHKey struct.
-				g.secretr.Store().SSHKeys[name] = SSHKey{Private: parts[0], Public: parts[1]}
+				g.secretr.Store().SSHKeys[name] = secretr.SSHKey{Private: parts[0], Public: parts[1]}
 			} else if strings.HasPrefix(g.currentKey, "certificate:") {
 				name := strings.TrimPrefix(g.currentKey, "certificate:")
 				g.secretr.Store().Certificates[name] = valEntry.Text
@@ -683,7 +685,7 @@ func (g *GUI) addSSHKey() {
 	var generateCheck *widget.Check
 	generateCheck = widget.NewCheck("Generate New Keys", func(checked bool) {
 		if checked {
-			p, pub, err := generateSSHKeyPair()
+			p, pub, err := secretr.GenerateSSHKeyPair()
 			if err != nil {
 				dialog.ShowError(err, g.mainWindow)
 				generateCheck.SetChecked(false)
@@ -711,7 +713,7 @@ func (g *GUI) addSSHKey() {
 				return
 			}
 			name := fmt.Sprintf("ssh-key:%d", time.Now().Unix())
-			g.secretr.Store().SSHKeys[name] = SSHKey{
+			g.secretr.Store().SSHKeys[name] = secretr.SSHKey{
 				Private: privateKeyEntry.Text,
 				Public:  publicKeyEntry.Text,
 			}
@@ -737,7 +739,7 @@ func (g *GUI) editSSHKey() {
 	var generateCheck *widget.Check
 	generateCheck = widget.NewCheck("Generate New Keys", func(checked bool) {
 		if checked {
-			p, pub, err := generateSSHKeyPair()
+			p, pub, err := secretr.GenerateSSHKeyPair()
 			if err != nil {
 				dialog.ShowError(err, g.mainWindow)
 				generateCheck.SetChecked(false)
@@ -762,7 +764,7 @@ func (g *GUI) editSSHKey() {
 			if !ok {
 				return
 			}
-			g.secretr.Store().SSHKeys[name] = SSHKey{
+			g.secretr.Store().SSHKeys[name] = secretr.SSHKey{
 				Private: privateKeyEntry.Text,
 				Public:  publicKeyEntry.Text,
 			}

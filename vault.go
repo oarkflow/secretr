@@ -1016,7 +1016,7 @@ func (v *Secretr) GenerateSSHKey(name string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.initData()
-	privateKey, publicKey, err := generateSSHKeyPair()
+	privateKey, publicKey, err := GenerateSSHKeyPair()
 	if err != nil {
 		return err
 	}
@@ -1066,8 +1066,8 @@ func (v *Secretr) GenerateHash(data string) string {
 	return generateHash(data)
 }
 
-// generateSSHKeyPair generates an SSH key pair (private and public keys).
-func generateSSHKeyPair() (string, string, error) {
+// GenerateSSHKeyPair generates an SSH key pair (private and public keys).
+func GenerateSSHKeyPair() (string, string, error) {
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to generate private key: %v", err)
@@ -1148,7 +1148,7 @@ func (v *Secretr) AddSSHKeyCLI(name string) error {
 	resp = strings.TrimSpace(strings.ToLower(resp))
 	var privateKey, publicKey string
 	if resp == "y" {
-		pKey, pubKey, err := generateSSHKeyPair()
+		pKey, pubKey, err := GenerateSSHKeyPair()
 		if err != nil {
 			return err
 		}
@@ -1194,7 +1194,7 @@ func (v *Secretr) EditSSHKeyCLI(name string) error {
 	resp = strings.TrimSpace(strings.ToLower(resp))
 	var privateKey, publicKey string
 	if resp == "y" {
-		p, pub, err := generateSSHKeyPair()
+		p, pub, err := GenerateSSHKeyPair()
 		if err != nil {
 			return err
 		}
