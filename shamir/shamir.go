@@ -68,7 +68,7 @@ func gfMulNoLUT(a, b byte) byte {
 // Inverse using tables
 func inv(a byte) (byte, error) {
 	if a == 0 {
-		return 0, errors.New("inverse of zero")
+		return 0, errors.New("shamir: inverse of zero")
 	}
 	// 255 - log(a)
 	return expTable[255-int(logTable[a])], nil
@@ -78,10 +78,10 @@ func inv(a byte) (byte, error) {
 // Each share is a byte slice of length len(secret)+1, where the first byte is the share index (1..255).
 func Split(secret []byte, t, n int) ([][]byte, error) {
 	if t < 2 || t > 255 {
-		return nil, errors.New("threshold must be between 2 and 255")
+		return nil, errors.New("shamir: threshold must be between 2 and 255")
 	}
 	if n < t || n > 255 {
-		return nil, errors.New("number of shares must be between threshold and 255")
+		return nil, errors.New("shamir: number of shares must be between threshold and 255")
 	}
 	// generate coefficients: a_0 = secret byte, a_1..a_{t-1} random
 	shares := make([][]byte, n)
@@ -117,7 +117,7 @@ func Split(secret []byte, t, n int) ([][]byte, error) {
 func Combine(shares [][]byte, t int) ([]byte, error) {
 	// Validate that we have at least t shares.
 	if len(shares) < t {
-		return nil, errors.New("insufficient shares for threshold")
+		return nil, errors.New("shamir: insufficient shares for threshold")
 	}
 	// Use only the first t shares.
 	if len(shares) > t {
@@ -131,14 +131,14 @@ func Combine(shares [][]byte, t int) ([]byte, error) {
 	used := make(map[byte]bool)
 	for i, s := range shares {
 		if len(s) != length {
-			return nil, errors.New("mismatched share lengths")
+			return nil, errors.New("shamir: mismatched share lengths")
 		}
 		xi := s[0]
 		if xi == 0 {
-			return nil, errors.New("share index cannot be zero")
+			return nil, errors.New("shamir: share index cannot be zero")
 		}
 		if used[xi] {
-			return nil, errors.New("duplicate share indices detected")
+			return nil, errors.New("shamir: duplicate share indices detected")
 		}
 		used[xi] = true
 		xs[i] = xi
