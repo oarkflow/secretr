@@ -17,8 +17,8 @@ func GenerateDBCredential(engine string) (map[string]string, error) {
 	default:
 		return nil, fmt.Errorf("unsupported database engine")
 	}
-	user := fmt.Sprintf("%s_%s", userPrefix, generateRandomString(8))
-	pass := generateRandomString(16)
+	user := fmt.Sprintf("%s_%s", userPrefix, GenerateRandomString(8))
+	pass := GenerateRandomString(16)
 	expiry := time.Now().Add(5 * time.Minute).Format(time.RFC3339)
 	return map[string]string{
 		"user":    user,
@@ -41,7 +41,7 @@ func GenerateCloudToken(provider string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported cloud provider")
 	}
-	token := fmt.Sprintf("%s-%s", prefix, generateRandomString(20))
+	token := fmt.Sprintf("%s-%s", prefix, GenerateRandomString(20))
 	return token, nil
 }
 

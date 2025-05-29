@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -24,41 +25,34 @@ func (d DummyPlugin) Execute(input any) (any, error) {
 
 func exampleAuthMethods() {
 	// OIDC example:
-	oidc := &secretr.OIDCAuth{
-		Issuer:       "https://accounts.example.com",
-		ClientID:     "client123",
-		ClientSecret: "secretABC",
-		User:         "oidc_user",
-	}
-	user, err := oidc.Authenticate(map[string]string{"id_token": "valid_oidc_token"})
+	oidcAuth, err := secretr.NewOIDCAuth(context.Background(), "https://accounts.example.com", "client123")
 	if err != nil {
-		fmt.Println("OIDCAuth error:", err)
+		fmt.Println("OIDCAuth init error:", err)
 	} else {
-		fmt.Println("OIDCAuth authenticated user:", user)
+		user, err := oidcAuth.Authenticate(map[string]string{"id_token": "valid_oidc_token"})
+		if err != nil {
+			fmt.Println("OIDCAuth error:", err)
+		} else {
+			fmt.Println("OIDCAuth authenticated user:", user)
+		}
 	}
 
 	// Kubernetes auth example:
-	k8s := &secretr.K8sAuth{
-		ServiceAccount: "default",
-		Token:          "k8s_valid_token",
-	}
-	user, err = k8s.Authenticate(map[string]string{"token": "k8s_valid_token", "service_account": "default"})
+	k8s := &secretr.K8sAuth{}
+	user, err := k8s.Authenticate(map[string]string{})
 	if err != nil {
 		fmt.Println("K8sAuth error:", err)
 	} else {
-		fmt.Println("K8sAuth authenticated service account:", user)
+		fmt.Println("K8sAuth authenticated service account token:", user)
 	}
 
 	// AWS IAM auth example:
 	awsiam := &secretr.AWSIAMAuth{
-		RoleARN: "arn:aws:iam::123456789012:role/MyRole",
-		Token:   "awsiam_valid_token",
-		User:    "aws_user",
+		AccessKeyID:     "your_access_key_id",
+		SecretAccessKey: "your_secret_access_key",
+		SessionToken:    "",
 	}
-	user, err = awsiam.Authenticate(map[string]string{
-		"token":    "awsiam_valid_token",
-		"role_arn": "arn:aws:iam::123456789012:role/MyRole",
-	})
+	user, err = awsiam.Authenticate(map[string]string{})
 	if err != nil {
 		fmt.Println("AWSIAMAuth error:", err)
 	} else {
@@ -68,6 +62,7 @@ func exampleAuthMethods() {
 
 func main() {
 	os.Setenv("SECRETR_MASTERKEY", "test1234")
+	os.Setenv("SECRETR_KEY", secretr.GenerateRandomString())
 
 	// Retrieve some existing secrets (if set)
 	openAIKey, err := secretr.Get("OPENAI_KEY")
@@ -193,7 +188,7 @@ func main() {
 
 	// --- Multi-Region Replication ---
 	// Replicate a backup to a regional directory.
-	if err := secretr.ReplicateBackup(secretr.Default(), "/Users/sujit/Sites/secretr/region_backup"); err != nil {
+	if err := secretr.ReplicateBackup(secretr.Default(), "./region_backup"); err != nil {
 		fmt.Println("Backup replication error:", err)
 	} else {
 		fmt.Println("Backup replicated successfully")

@@ -18,6 +18,7 @@ import (
 	"io"
 	"log"
 	"math/big"
+	mathRand "math/rand"
 	"net/smtp"
 	"os"
 	"path/filepath"
@@ -1321,18 +1322,44 @@ func (v *Secretr) DeleteSSHKeyCLI(name string) {
 	delete(v.store.SSHKeys, name)
 }
 
-// Helper function to generate a random hex string of specified length.
-func generateRandomString(length int) string {
-	b := make([]byte, length/2)
-	_, _ = rand.Read(b)
-	return fmt.Sprintf("%x", b)
+var src = mathRand.NewSource(time.Now().UnixNano())
+
+const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._$~"
+const (
+	letterIdxBits = 6                    // 6 bits to represent a letter index
+	letterIdxMask = 1<<letterIdxBits - 1 // All 1-bits, as many as letterIdxBits
+	letterIdxMax  = 63 / letterIdxBits   // # of letter indices fitting in 63 bits
+)
+
+func GenerateRandomString(length ...int) string {
+	n := 32 // Default length
+	if len(length) > 0 {
+		n = length[0]
+	} else if n < 1 {
+		n = 32 // Ensure at least 1 character
+	}
+	b := make([]byte, n)
+	// A src.Int63() generates 63 random bits, enough for letterIdxMax characters!
+	for i, cache, remain := n-1, src.Int63(), letterIdxMax; i >= 0; {
+		if remain == 0 {
+			cache, remain = src.Int63(), letterIdxMax
+		}
+		if idx := int(cache & letterIdxMask); idx < len(letterBytes) {
+			b[i] = letterBytes[idx]
+			i--
+		}
+		cache >>= letterIdxBits
+		remain--
+	}
+
+	return string(b)
 }
 
 // GenerateDynamicSecret creates a dynamic secret with a lease.
 func (v *Secretr) GenerateDynamicSecret(name string, leaseDuration time.Duration) (string, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	secret := generateRandomString(32)
+	secret := GenerateRandomString(32)
 	leaseUntil := time.Now().Add(leaseDuration)
 	meta := SecretMeta{
 		Value:      secret,
