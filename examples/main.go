@@ -154,4 +154,61 @@ func main() {
 	} else {
 		fmt.Println("Backup replicated successfully")
 	}
+
+	// Example for HMAC Signing and Verification using SignData and VerifySignature:
+	// First, set a key to be used as the HMAC key.
+	secretHMACKey := "my_hmac_secret"
+	if err := secretr.Set("hmac_key", secretHMACKey); err != nil {
+		panic(err)
+	}
+	dataToSign := "important message"
+	signature, err := secretr.SignData("hmac_key", dataToSign)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("Data Signature:", signature)
+	valid, err := secretr.VerifySignature("hmac_key", dataToSign, signature)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("Signature valid?", valid)
+
+	// Example for Hash Generation:
+	hash, err := secretr.GenerateHash("The quick brown fox jumps over the lazy dog")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("SHA-256 Hash:", hash)
+
+	// Example for environment variable setting via Env:
+	if err := secretr.Env("api_key"); err != nil {
+		fmt.Println("Env error:", err)
+	} else {
+		fmt.Println("Environment variable 'api_key' is set.")
+	}
+
+	// Example for SSH Key Generation:
+	if err := secretr.GenerateSSHKey("my_ssh_key"); err != nil {
+		fmt.Println("SSH Key generation error:", err)
+	} else {
+		sshKeyData, err := secretr.Get("ssh-key:my_ssh_key")
+		if err == nil {
+			fmt.Println("SSH Key generated. (Private key stored securely)")
+		}
+		fmt.Println(sshKeyData)
+	}
+
+	// Example for Certificate Generation:
+	if err := secretr.GenerateCertificate("my_cert", 30*24*time.Hour); err != nil {
+		fmt.Println("Certificate generation error:", err)
+	} else {
+		certData, err := secretr.Get("certificate:my_cert")
+		if err == nil {
+			fmt.Println("Certificate generated successfully.")
+		}
+		fmt.Println(certData)
+	}
+
+	// End of examples.
+	fmt.Println("All additional examples executed successfully.")
 }

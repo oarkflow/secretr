@@ -84,3 +84,45 @@ func RollbackKVSecret(key string, versionIndex int) error {
 	}
 	return defaultSecretr.RollbackKVSecret(key, versionIndex)
 }
+
+func SignData(key string, data string) (string, error) {
+	if defaultSecretr == nil {
+		return "", fmt.Errorf("secretr not initialized")
+	}
+	return defaultSecretr.SignData(key, data)
+}
+
+func VerifySignature(key string, data string, signature string) (bool, error) {
+	if defaultSecretr == nil {
+		return false, fmt.Errorf("secretr not initialized")
+	}
+	return defaultSecretr.VerifySignature(key, data, signature)
+}
+
+func GenerateHash(data string) (string, error) {
+	if defaultSecretr == nil {
+		return "", fmt.Errorf("secretr not initialized")
+	}
+	return defaultSecretr.GenerateHash(data), nil
+}
+
+func Env(key string) error {
+	if defaultSecretr == nil {
+		return fmt.Errorf("secretr not initialized")
+	}
+	return defaultSecretr.Env(key)
+}
+
+func GenerateSSHKey(key string) error {
+	if defaultSecretr == nil {
+		return fmt.Errorf("secretr not initialized")
+	}
+	return defaultSecretr.GenerateSSHKey(key)
+}
+
+func GenerateCertificate(key string, dur time.Duration) error {
+	if defaultSecretr == nil {
+		return fmt.Errorf("secretr not initialized")
+	}
+	return defaultSecretr.GenerateCertificate(key, dur)
+}
