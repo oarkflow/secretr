@@ -64,48 +64,104 @@ func resetRateLimiter() {
 // secretrHTTPHandler processes HTTP requests for secretr operations.
 func secretrHTTPHandler(v *Secretr, w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimPrefix(r.URL.Path, "/secretr/")
-	switch r.Method {
-	case http.MethodGet:
-		if key == "" || key == "keys" {
-			keys := v.List()
-			json.NewEncoder(w).Encode(keys)
-			LogAudit("list", "", "listed keys", v.masterKey)
-			return
+	switch {
+	// NEW: Dynamic secret generation endpoint. Expects lease duration in seconds as ?lease=3600.
+	case strings.HasPrefix(key, "dynamic/"):
+		name := strings.TrimPrefix(key, "dynamic/")
+		leaseStr := r.URL.Query().Get("lease")
+		leaseSec, err := time.ParseDuration(leaseStr + "s")
+		if err != nil || leaseSec <= 0 {
+			leaseSec = time.Minute * 10 // default lease duration
 		}
-		val, err := v.Get(key)
+		secret, err := v.GenerateDynamicSecret(name, leaseSec)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
+			http.Error(w, "failed to generate dynamic secret: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.Write([]byte(val))
-		LogAudit("get", key, "retrieved", v.masterKey)
-	case http.MethodPost, http.MethodPut:
-		body, _ := io.ReadAll(r.Body)
-		if err := v.Set(key, string(body)); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-		LogAudit("set", key, "updated", v.masterKey)
-	case http.MethodDelete:
-		if err := v.Delete(key); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-		LogAudit("delete", key, "deleted", v.masterKey)
+		w.Write([]byte(secret))
+		LogAudit("dynamic", name, "generated dynamic secret", v.masterKey)
+		return
+
+	// handling other cases...
+	case key == "" || key == "keys":
+		keys := v.List()
+		_ = json.NewEncoder(w).Encode(keys)
+		LogAudit("list", "", "listed keys", v.masterKey)
+		return
+	// ...existing code...
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		switch r.Method {
+		case http.MethodGet:
+			val, err := v.Get(key)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			w.Write([]byte(val))
+			LogAudit("get", key, "retrieved", v.masterKey)
+		case http.MethodPost, http.MethodPut:
+			body, _ := io.ReadAll(r.Body)
+			if err := v.Set(key, string(body)); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			LogAudit("set", key, "updated", v.masterKey)
+		case http.MethodDelete:
+			if err := v.Delete(key); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			LogAudit("delete", key, "deleted", v.masterKey)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
 	}
+}
+
+// NEW: Transit engine endpoints.
+func initTransitEndpoints(mux *http.ServeMux, v *Secretr) {
+	mux.HandleFunc("/secretr/transit/encrypt", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		encrypted, err := v.TransitEncrypt(string(body))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Write([]byte(encrypted))
+		LogAudit("transit_encrypt", "", "encrypted data", v.masterKey)
+	})
+	mux.HandleFunc("/secretr/transit/decrypt", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		decrypted, err := v.TransitDecrypt(string(body))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Write([]byte(decrypted))
+		LogAudit("transit_decrypt", "", "decrypted data", v.masterKey)
+	})
 }
 
 // StartSecureHTTPServer initializes and runs an HTTP/HTTPS server with graceful shutdown.
 func StartSecureHTTPServer(v *Secretr) {
 	mux := http.NewServeMux()
 	// Protect endpoints with auth and rate-limiting middleware.
+	// Register dynamic secrets endpoint within secretrHTTPHandler.
 	mux.Handle("/secretr/", authMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		secretrHTTPHandler(v, w, r)
 	}))))
+	// NEW: Register transit endpoints.
+	initTransitEndpoints(mux, v)
 
 	mux.HandleFunc("/secretr/export", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

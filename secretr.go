@@ -66,18 +66,28 @@ type SSHKey struct {
 	Public  string `json:"public"`
 }
 
-// Modify Persist: change SSHKeys field type.
+// NEW: SecretMeta represents a secret with versioning and lease.
+type SecretMeta struct {
+	Value      string            `json:"value"`
+	Version    int               `json:"version"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
+	CreatedAt  time.Time         `json:"createdAt"`
+	LeaseUntil time.Time         `json:"leaseUntil,omitempty"`
+}
+
+// Modify Persist: add KVSecrets field for static secret versioning.
 type Persist struct {
-	Data              map[string]any    `json:"data"`
-	ResetAttempts     int               `json:"resetAttempts"`
-	NormalAttempts    int               `json:"normalAttempts"`
-	BannedUntil       time.Time         `json:"bannedUntil"`
-	LockedForever     bool              `json:"lockedForever"`
-	EnableReset       bool              `json:"enableReset"`
-	ResetCode         string            `json:"resetCode"`
-	DeviceFingerprint string            `json:"deviceFingerprint"`
-	SSHKeys           map[string]SSHKey `json:"sshKeys"` // updated type
-	Certificates      map[string]string `json:"certificates"`
+	Data              map[string]any          `json:"data"`
+	ResetAttempts     int                     `json:"resetAttempts"`
+	NormalAttempts    int                     `json:"normalAttempts"`
+	BannedUntil       time.Time               `json:"bannedUntil"`
+	LockedForever     bool                    `json:"lockedForever"`
+	EnableReset       bool                    `json:"enableReset"`
+	ResetCode         string                  `json:"resetCode"`
+	DeviceFingerprint string                  `json:"deviceFingerprint"`
+	SSHKeys           map[string]SSHKey       `json:"sshKeys"`
+	Certificates      map[string]string       `json:"certificates"`
+	KVSecrets         map[string][]SecretMeta `json:"kvSecrets,omitempty"` // NEW field
 }
 
 func NewPersist() Persist {
@@ -92,6 +102,7 @@ func NewPersist() Persist {
 		DeviceFingerprint: fingerprint,
 		SSHKeys:           make(map[string]SSHKey),
 		Certificates:      make(map[string]string),
+		KVSecrets:         make(map[string][]SecretMeta), // initialize KVSecrets
 	}
 }
 
@@ -160,50 +171,6 @@ func init() {
 		log.Fatal(err)
 	}
 	defaultSecretr = New()
-}
-
-func Set(key string, value any) error {
-	if defaultSecretr == nil {
-		return fmt.Errorf("secretr not initialized")
-	}
-	return defaultSecretr.Set(key, value)
-}
-
-func Copy(key string) error {
-	if defaultSecretr == nil {
-		return fmt.Errorf("secretr not initialized")
-	}
-	return defaultSecretr.Copy(key)
-}
-
-func Delete(key string) error {
-	if defaultSecretr == nil {
-		return fmt.Errorf("secretr not initialized")
-	}
-	return defaultSecretr.Delete(key)
-}
-
-// Get retrieves the value associated with the provided key.
-func Get(key string) (string, error) {
-	if defaultSecretr == nil {
-		return "", fmt.Errorf("secretr not initialized")
-	}
-	return defaultSecretr.Get(key)
-}
-
-func Unmarshal(key string, dest any) error {
-	if defaultSecretr == nil {
-		return fmt.Errorf("secretr not initialized")
-	}
-	return defaultSecretr.Unmarshal(key, dest)
-}
-
-// LoadFromEnv loads environment variables into the secretr.
-func LoadFromEnv() {
-	if defaultSecretr == nil {
-		log.Fatal("secretr not initialized")
-	}
-	defaultSecretr.LoadFromEnv()
 }
 
 // FilePath returns the path of the secretr storage file.
@@ -1239,4 +1206,66 @@ func (v *Secretr) RevealSSHKeyCLI(name string) {
 // Updated DeleteSSHKeyCLI to show keys in two separate sections.
 func (v *Secretr) DeleteSSHKeyCLI(name string) {
 	delete(v.store.SSHKeys, name)
+}
+
+// NEW: Helper function to generate a random hex string of specified length.
+func generateRandomString(length int) string {
+	b := make([]byte, length/2)
+	_, _ = rand.Read(b)
+	return fmt.Sprintf("%x", b)
+}
+
+// NEW: GenerateDynamicSecret creates a dynamic secret, leased until leaseDuration.
+func (v *Secretr) GenerateDynamicSecret(name string, leaseDuration time.Duration) (string, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	secret := generateRandomString(32)
+	leaseUntil := time.Now().Add(leaseDuration)
+	meta := SecretMeta{
+		Value:      secret,
+		Version:    1,
+		CreatedAt:  time.Now(),
+		LeaseUntil: leaseUntil,
+	}
+	if v.store.KVSecrets == nil {
+		v.store.KVSecrets = make(map[string][]SecretMeta)
+	}
+	v.store.KVSecrets[name] = append(v.store.KVSecrets[name], meta)
+	if err := v.Save(); err != nil {
+		return "", err
+	}
+	return secret, nil
+}
+
+// NEW: TransitEncrypt encrypts the plaintext using AES-GCM, returning a base64 encoded string.
+func (v *Secretr) TransitEncrypt(plaintext string) (string, error) {
+	if v.cipherGCM == nil {
+		return "", fmt.Errorf("cipher not initialized")
+	}
+	nonce := make([]byte, v.nonceSize)
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+	ciphertext := v.cipherGCM.Seal(nonce, nonce, []byte(plaintext), nil)
+	return base64.StdEncoding.EncodeToString(ciphertext), nil
+}
+
+// NEW: TransitDecrypt decrypts the given base64 encoded ciphertext using AES-GCM.
+func (v *Secretr) TransitDecrypt(encText string) (string, error) {
+	if v.cipherGCM == nil {
+		return "", fmt.Errorf("cipher not initialized")
+	}
+	cipherData, err := base64.StdEncoding.DecodeString(encText)
+	if err != nil {
+		return "", err
+	}
+	if len(cipherData) < v.nonceSize {
+		return "", fmt.Errorf("invalid ciphertext")
+	}
+	nonce := cipherData[:v.nonceSize]
+	plaintext, err := v.cipherGCM.Open(nil, nonce, cipherData[v.nonceSize:], nil)
+	if err != nil {
+		return "", err
+	}
+	return string(plaintext), nil
 }
