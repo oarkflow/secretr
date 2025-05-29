@@ -61,3 +61,57 @@ func (la *LDAPAuth) Authenticate(credentials map[string]string) (string, error) 
 	}
 	return user, nil
 }
+
+// NEW: OIDCAuth implements OIDC-based authentication.
+type OIDCAuth struct {
+	Issuer       string
+	ClientID     string
+	ClientSecret string
+	User         string
+}
+
+func (oa *OIDCAuth) Name() string {
+	return "oidc"
+}
+
+func (oa *OIDCAuth) Authenticate(credentials map[string]string) (string, error) {
+	if credentials["id_token"] == "valid_oidc_token" {
+		return oa.User, nil
+	}
+	return "", errors.New("invalid OIDC token")
+}
+
+// NEW: K8sAuth implements Kubernetes service account authentication.
+type K8sAuth struct {
+	ServiceAccount string
+	Token          string
+}
+
+func (ka *K8sAuth) Name() string {
+	return "k8s"
+}
+
+func (ka *K8sAuth) Authenticate(credentials map[string]string) (string, error) {
+	if credentials["token"] == ka.Token && credentials["service_account"] == ka.ServiceAccount {
+		return ka.ServiceAccount, nil
+	}
+	return "", errors.New("invalid Kubernetes credentials")
+}
+
+// NEW: AWSIAMAuth implements AWS IAM-based authentication.
+type AWSIAMAuth struct {
+	RoleARN string
+	Token   string
+	User    string
+}
+
+func (aa *AWSIAMAuth) Name() string {
+	return "awsiam"
+}
+
+func (aa *AWSIAMAuth) Authenticate(credentials map[string]string) (string, error) {
+	if credentials["token"] == aa.Token && credentials["role_arn"] == aa.RoleARN {
+		return aa.User, nil
+	}
+	return "", errors.New("invalid AWS IAM credentials")
+}

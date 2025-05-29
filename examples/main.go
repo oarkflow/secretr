@@ -22,6 +22,50 @@ func (d DummyPlugin) Execute(input any) (any, error) {
 	return fmt.Sprintf("Processed: %v", input), nil
 }
 
+func exampleAuthMethods() {
+	// OIDC example:
+	oidc := &secretr.OIDCAuth{
+		Issuer:       "https://accounts.example.com",
+		ClientID:     "client123",
+		ClientSecret: "secretABC",
+		User:         "oidc_user",
+	}
+	user, err := oidc.Authenticate(map[string]string{"id_token": "valid_oidc_token"})
+	if err != nil {
+		fmt.Println("OIDCAuth error:", err)
+	} else {
+		fmt.Println("OIDCAuth authenticated user:", user)
+	}
+
+	// Kubernetes auth example:
+	k8s := &secretr.K8sAuth{
+		ServiceAccount: "default",
+		Token:          "k8s_valid_token",
+	}
+	user, err = k8s.Authenticate(map[string]string{"token": "k8s_valid_token", "service_account": "default"})
+	if err != nil {
+		fmt.Println("K8sAuth error:", err)
+	} else {
+		fmt.Println("K8sAuth authenticated service account:", user)
+	}
+
+	// AWS IAM auth example:
+	awsiam := &secretr.AWSIAMAuth{
+		RoleARN: "arn:aws:iam::123456789012:role/MyRole",
+		Token:   "awsiam_valid_token",
+		User:    "aws_user",
+	}
+	user, err = awsiam.Authenticate(map[string]string{
+		"token":    "awsiam_valid_token",
+		"role_arn": "arn:aws:iam::123456789012:role/MyRole",
+	})
+	if err != nil {
+		fmt.Println("AWSIAMAuth error:", err)
+	} else {
+		fmt.Println("AWSIAMAuth authenticated user:", user)
+	}
+}
+
 func main() {
 	os.Setenv("SECRETR_MASTERKEY", "test1234")
 
@@ -211,4 +255,7 @@ func main() {
 
 	// End of examples.
 	fmt.Println("All additional examples executed successfully.")
+
+	// Additional examples for new auth methods:
+	exampleAuthMethods()
 }

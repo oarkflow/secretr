@@ -50,7 +50,7 @@ func BackupSecretr(v *Secretr) error {
 	return os.WriteFile(filename, []byte(exp), 0600)
 }
 
-// ReplicateBackup creates a backup in a specified regional directory.
+// ReplicateBackup creates a backup file in the specified regional directory.
 func ReplicateBackup(v *Secretr, regionDir string) error {
 	exp, err := ExportSecretr(v)
 	if err != nil {

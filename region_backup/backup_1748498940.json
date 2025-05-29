@@ -1,0 +1,9 @@
+{
+  "data": {
+    "DEEPSEEK_KEY": "world",
+    "OPENAI_KEY": "hello",
+    "api_key": "34d03bf4c83578e9366542aaef557951",
+    "hmac_key": "my_hmac_secret"
+  },
+  "timestamp": "2025-05-29T11:54:00.584574+05:45"
+}

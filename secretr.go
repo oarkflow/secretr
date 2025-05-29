@@ -25,9 +25,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-	
+
 	"golang.org/x/term"
-	
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ses"
@@ -189,7 +189,7 @@ func (v *Secretr) PromptMaster() error {
 	if time.Since(v.authedAt) < authCacheDuration && v.cipherGCM != nil {
 		return nil
 	}
-	
+
 	// Call the custom GUI prompt if set.
 	if v.promptFunc != nil {
 		err := v.promptFunc()
@@ -198,7 +198,7 @@ func (v *Secretr) PromptMaster() error {
 		}
 		return err
 	}
-	
+
 	// Use SECRETR_MASTERKEY from the environment if set.
 	if envKey := os.Getenv("SECRETR_MASTERKEY"); envKey != "" {
 		if _, err := os.Stat(FilePath()); os.IsNotExist(err) {
@@ -233,7 +233,7 @@ func (v *Secretr) PromptMaster() error {
 			}
 		}
 	}
-	
+
 	if v.store.EnableReset && ((!v.store.BannedUntil.IsZero() && time.Now().Before(v.store.BannedUntil)) || v.store.LockedForever) {
 		if err := v.forceReset(); err != nil {
 			return err
@@ -241,14 +241,14 @@ func (v *Secretr) PromptMaster() error {
 		v.authedAt = time.Now()
 		return nil
 	}
-	
+
 	if v.store.LockedForever {
 		return fmt.Errorf("secretr locked permanently")
 	}
 	if !v.store.BannedUntil.IsZero() && time.Now().Before(v.store.BannedUntil) {
 		return fmt.Errorf("secretr banned until %v", v.store.BannedUntil.Format(time.DateTime))
 	}
-	
+
 	if _, err := os.Stat(FilePath()); os.IsNotExist(err) {
 		for {
 			fmt.Println("Secretr database not found. Setting up a new secretr.")
@@ -476,7 +476,7 @@ func (v *Secretr) Load() error {
 	if err != nil {
 		return fmt.Errorf("Invalid MasterKey or corrupt secretr file: %v", err)
 	}
-	
+
 	var persist Persist
 	if err := json.Unmarshal(plain, &persist); err != nil {
 		return err
@@ -667,7 +667,7 @@ func (v *Secretr) Delete(key string) error {
 	} else {
 		delete(v.store.Data, key)
 	}
-	
+
 	err := v.Save()
 	if err == nil {
 		LogAudit("delete", key, "deleted", v.masterKey)
@@ -686,7 +686,7 @@ func (v *Secretr) Copy(key string) error {
 
 // Env sets a secret as an environment variable.
 func (v *Secretr) Env(key string) error {
-	
+
 	secret, err := v.Get(key)
 	if err != nil {
 		return err
@@ -897,7 +897,7 @@ func cliLoop(secretr *Secretr) {
 				fmt.Println("error:", err)
 			}
 		case "env":
-			
+
 			if err := secretr.Env(key); err != nil {
 				fmt.Println("error:", err)
 			} else {
@@ -1157,13 +1157,13 @@ func GenerateSSHKeyPair() (string, string, error) {
 		return "", "", fmt.Errorf("failed to marshal private key: %v", err)
 	}
 	privatePEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privateKeyBytes})
-	
+
 	publicKeyBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to marshal public key: %v", err)
 	}
 	publicPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicKeyBytes})
-	
+
 	return string(privatePEM), string(publicPEM), nil
 }
 
@@ -1328,7 +1328,7 @@ func generateRandomString(length int) string {
 	return fmt.Sprintf("%x", b)
 }
 
-// GenerateDynamicSecret creates a dynamic secret, leased until leaseDuration.
+// GenerateDynamicSecret creates a dynamic secret with a lease.
 func (v *Secretr) GenerateDynamicSecret(name string, leaseDuration time.Duration) (string, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -1350,7 +1350,7 @@ func (v *Secretr) GenerateDynamicSecret(name string, leaseDuration time.Duration
 	return secret, nil
 }
 
-// TransitEncrypt encrypts the plaintext using AES-GCM, returning a base64 encoded string.
+// TransitEncrypt and TransitDecrypt offer encryption as a service.
 func (v *Secretr) TransitEncrypt(plaintext string) (string, error) {
 	if v.cipherGCM == nil {
 		return "", fmt.Errorf("cipher not initialized")
@@ -1363,7 +1363,6 @@ func (v *Secretr) TransitEncrypt(plaintext string) (string, error) {
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-// TransitDecrypt decrypts the given base64 encoded ciphertext using AES-GCM.
 func (v *Secretr) TransitDecrypt(encText string) (string, error) {
 	if v.cipherGCM == nil {
 		return "", fmt.Errorf("cipher not initialized")
@@ -1395,7 +1394,7 @@ func (v *Secretr) ListKVSecretVersions(key string) ([]SecretMeta, error) {
 	return versions, nil
 }
 
-// RollbackKVSecret Rollback the KV secret to a specified version index.
+// RollbackKVSecret rolls back to a prior version for static (KV) secrets.
 func (v *Secretr) RollbackKVSecret(key string, versionIndex int) error {
 	versions, err := v.ListKVSecretVersions(key)
 	if err != nil {
@@ -1404,9 +1403,7 @@ func (v *Secretr) RollbackKVSecret(key string, versionIndex int) error {
 	if versionIndex < 0 || versionIndex >= len(versions) {
 		return fmt.Errorf("invalid version index")
 	}
-	// set the chosen version as the active value in the static store.
 	v.store.Data[key] = versions[versionIndex].Value
-	// remove any versions after the rollback point.
 	v.store.KVSecrets[key] = versions[:versionIndex+1]
 	if err := v.Save(); err != nil {
 		return err

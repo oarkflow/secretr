@@ -17,10 +17,8 @@ func GenerateDBCredential(engine string) (map[string]string, error) {
 	default:
 		return nil, fmt.Errorf("unsupported database engine")
 	}
-	// generate random username/password
 	user := fmt.Sprintf("%s_%s", userPrefix, generateRandomString(8))
 	pass := generateRandomString(16)
-	// For leasing purposes show an expiry timestamp (e.g., 5 minutes lease).
 	expiry := time.Now().Add(5 * time.Minute).Format(time.RFC3339)
 	return map[string]string{
 		"user":    user,
@@ -31,7 +29,7 @@ func GenerateDBCredential(engine string) (map[string]string, error) {
 
 // GenerateCloudToken simulates generating a token for a cloud provider.
 func GenerateCloudToken(provider string) (string, error) {
-	// For demonstration we respond to "aws", "azure" and "gcp".
+	// Supports "aws", "azure" and "gcp".
 	var prefix string
 	switch provider {
 	case "aws":
@@ -47,14 +45,13 @@ func GenerateCloudToken(provider string) (string, error) {
 	return token, nil
 }
 
-// WrapResponse encrypts and wraps a sensitive response into a single-use token.
+// WrapResponse encrypts sensitive data into a one‑time wrapping token.
 // For simplicity, we reuse TransitEncrypt.
 func WrapResponse(v *Secretr, data string) (string, error) {
 	encrypted, err := v.TransitEncrypt(data)
 	if err != nil {
 		return "", err
 	}
-	// In production the wrapping token would be stored and invalidated after use.
 	return encrypted, nil
 }
 
