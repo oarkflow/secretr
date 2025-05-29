@@ -44,6 +44,7 @@ var (
 	masterKeyDir       = os.Getenv("SECRETR_MASTERKEY_DIR")
 	masterKeyThreshold = 3
 	masterKeyShares    = 5
+	checkDevice        = true // default to true, can be set via SetCheckDevice
 	defaultSecretr     *Secretr
 	fingerprint        string
 )
@@ -53,6 +54,10 @@ const (
 	authCacheDuration = time.Minute
 	saltSize          = 16
 )
+
+func SetCheckDevice(check bool) {
+	checkDevice = check
+}
 
 func SetMasterKeyDir(dir string) {
 	if dir != "" {
@@ -253,7 +258,9 @@ func SaltSize() int {
 // init initializes the secretr by setting up storage.
 func init() {
 	var err error
-	fingerprint, err = GetDeviceFingerPrint()
+	if checkDevice {
+		fingerprint, err = GetDeviceFingerPrint()
+	}
 	if err != nil {
 		log.Fatalf("failed to get device fingerprint: %v", err)
 	}
@@ -574,7 +581,7 @@ func (v *Secretr) Load() error {
 		return err
 	}
 	v.store = persist
-	if v.store.DeviceFingerprint != "" {
+	if checkDevice && v.store.DeviceFingerprint != "" {
 		if v.store.DeviceFingerprint != fingerprint {
 			return fmt.Errorf("access denied: secretr cannot be accessed from this device")
 		}
