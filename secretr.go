@@ -33,12 +33,19 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ses"
 	"github.com/oarkflow/clipboard"
+
+	"github.com/oarkflow/secretr/shamir"
+	"github.com/oarkflow/secretr/storage"
+	"github.com/oarkflow/secretr/storage/drivers"
 )
 
 var (
-	secretrDir     = os.Getenv("SECRETR_DIR")
-	defaultSecretr *Secretr
-	fingerprint    string
+	secretrDir         = os.Getenv("SECRETR_DIR")
+	masterKeyDir       = os.Getenv("SECRETR_MASTERKEY_DIR")
+	masterKeyThreshold = 3
+	masterKeyShares    = 5
+	defaultSecretr     *Secretr
+	fingerprint        string
 )
 
 const (
@@ -46,6 +53,24 @@ const (
 	authCacheDuration = time.Minute
 	saltSize          = 16
 )
+
+func SetMasterKeyDir(dir string) {
+	if dir != "" {
+		masterKeyDir = dir
+	}
+}
+
+func SetMasterKeyThreshold(threshold int) {
+	if threshold > 0 {
+		masterKeyThreshold = threshold
+	}
+}
+
+func SetMasterKeyShares(shares int) {
+	if shares > 0 {
+		masterKeyShares = shares
+	}
+}
 
 // initStorage initializes the secretr storage directory.
 func initStorage() error {
@@ -58,6 +83,15 @@ func initStorage() error {
 	}
 	if _, err := os.Stat(secretrDir); os.IsNotExist(err) {
 		err = os.MkdirAll(secretrDir, 0700)
+		if err != nil {
+			return fmt.Errorf("Error creating .secretr directory: %v", err)
+		}
+	}
+	if masterKeyDir == "" {
+		masterKeyDir = filepath.Join(secretrDir, "masterkey_shares")
+	}
+	if _, err := os.Stat(masterKeyDir); os.IsNotExist(err) {
+		err = os.MkdirAll(masterKeyDir, 0700)
 		if err != nil {
 			return fmt.Errorf("Error creating .secretr directory: %v", err)
 		}
@@ -113,15 +147,20 @@ func NewPersist() Persist {
 
 // Secretr represents the secret storage with encryption, reset and rate limiting.
 type Secretr struct {
-	store     Persist
-	masterKey []byte
-	salt      []byte
-	authedAt  time.Time
-	mu        sync.Mutex
-	cipherGCM cipher.AEAD
-	nonceSize int
-	// Added field for prompt override:
-	promptFunc func() error
+	store         Persist
+	masterKey     []byte
+	salt          []byte
+	authedAt      time.Time
+	mu            sync.Mutex
+	cipherGCM     cipher.AEAD
+	nonceSize     int
+	promptFunc    func() error
+	distributeKey bool
+}
+
+// SetDistributeKey sets the distributeKey flag on the default secretr.
+func SetDistributeKey(value bool) {
+	defaultSecretr.distributeKey = value
 }
 
 // New creates a new Secretr instance.
@@ -136,6 +175,50 @@ func New() *Secretr {
 // SetPrompt method to set GUI prompt override.
 func (v *Secretr) SetPrompt(prompt func() error) {
 	v.promptFunc = prompt
+}
+
+func (v *Secretr) distributeMasterKey(masterKey []byte) error {
+	if !v.distributeKey {
+		return nil
+	}
+	shares, err := shamir.Split(masterKey, masterKeyThreshold, masterKeyShares)
+	if err != nil {
+		return fmt.Errorf("failed to split master key: %v", err)
+	}
+	ms := storage.New()
+	fileStorage, err := drivers.NewFileStorage(masterKeyDir)
+	if err != nil {
+		return fmt.Errorf("failed to create file storage for master key shares: %v", err)
+	}
+	for _, share := range shares {
+		ms.AssignStorage(share[0], fileStorage)
+	}
+	if err := storage.StoreSharesMulti(shares, ms); err != nil {
+		return fmt.Errorf("failed to store master key shares: %v", err)
+	}
+	return nil
+}
+
+func (v *Secretr) validateMasterKey(masterKey []byte) error {
+	if !v.distributeKey {
+		return nil
+	}
+	fileStorage, err := drivers.NewFileStorage(masterKeyDir)
+	if err != nil {
+		return err
+	}
+	indices, err := fileStorage.ListShares()
+	if err != nil {
+		return err
+	}
+	reconstructed, err := shamir.MultiPartyAuthorize(fileStorage, indices, masterKeyThreshold)
+	if err != nil {
+		return fmt.Errorf("failed to reconstruct master key: %v", err)
+	}
+	if !hmac.Equal(reconstructed, masterKey) {
+		return fmt.Errorf("MasterKey from SECRETR_MASTERKEY is invalid (distributed verification failed)")
+	}
+	return nil
 }
 
 // InitCipher initializes the AES-GCM cipher with the provided password and salt.
@@ -269,6 +352,10 @@ func (v *Secretr) PromptMaster() error {
 				fmt.Println("MasterKeys do not match. Try again.")
 				continue
 			}
+			err = v.distributeMasterKey(pw1)
+			if err != nil {
+				return err
+			}
 			v.InitCipher(pw1, nil)
 			v.store.DeviceFingerprint = fingerprint
 			fmt.Print("Enable Reset Password? (y/N): ")
@@ -303,6 +390,10 @@ func (v *Secretr) PromptMaster() error {
 			fmt.Print("Enter MasterKey: ")
 			pw, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Println()
+			if err != nil {
+				return err
+			}
+			err = v.validateMasterKey(pw)
 			if err != nil {
 				return err
 			}
@@ -739,8 +830,9 @@ func Default() *Secretr {
 }
 
 // Execute runs the secretr CLI loop.
-func Execute() {
+func Execute(distributeKey bool) {
 	secretr := New()
+	secretr.distributeKey = distributeKey
 	err := secretr.PromptMaster()
 	if err != nil {
 		fmt.Println("Error:", err)
