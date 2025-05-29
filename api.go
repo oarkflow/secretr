@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -65,7 +67,6 @@ func resetRateLimiter() {
 func secretrHTTPHandler(v *Secretr, w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimPrefix(r.URL.Path, "/secretr/")
 	switch {
-	// NEW: Dynamic secret generation endpoint. Expects lease duration in seconds as ?lease=3600.
 	case strings.HasPrefix(key, "dynamic/"):
 		name := strings.TrimPrefix(key, "dynamic/")
 		leaseStr := r.URL.Query().Get("lease")
@@ -81,14 +82,13 @@ func secretrHTTPHandler(v *Secretr, w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(secret))
 		LogAudit("dynamic", name, "generated dynamic secret", v.masterKey)
 		return
-
+	
 	// handling other cases...
 	case key == "" || key == "keys":
 		keys := v.List()
 		_ = json.NewEncoder(w).Encode(keys)
 		LogAudit("list", "", "listed keys", v.masterKey)
 		return
-	// ...existing code...
 	default:
 		switch r.Method {
 		case http.MethodGet:
@@ -152,6 +152,93 @@ func initTransitEndpoints(mux *http.ServeMux, v *Secretr) {
 	})
 }
 
+// NEW: Additional API endpoints for secret engines, response wrapping and KV rollback.
+func initExtraEndpoints(mux *http.ServeMux, v *Secretr) {
+	// Dynamic Database Credentials engine
+	mux.Handle("/secretr/engine/db", authMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		engine := r.URL.Query().Get("engine")
+		if engine == "" {
+			http.Error(w, "engine parameter required", http.StatusBadRequest)
+			return
+		}
+		creds, err := GenerateDBCredential(engine)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(creds)
+		LogAudit("db_engine", engine, "generated db credentials", v.masterKey)
+	}))))
+	
+	// Cloud Provider Credentials engine
+	mux.Handle("/secretr/engine/cloud", authMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		provider := r.URL.Query().Get("provider")
+		if provider == "" {
+			http.Error(w, "provider parameter required", http.StatusBadRequest)
+			return
+		}
+		token, err := GenerateCloudToken(provider)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Write([]byte(token))
+		LogAudit("cloud_engine", provider, "generated cloud token", v.masterKey)
+	}))))
+	
+	// Response wrapping endpoints.
+	mux.Handle("/secretr/wrap", authMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		token, err := WrapResponse(v, string(body))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Write([]byte(token))
+		LogAudit("wrap", "", "wrapped response", v.masterKey)
+	}))))
+	
+	mux.Handle("/secretr/unwrap", authMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		plain, err := UnwrapResponse(v, string(body))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Write([]byte(plain))
+		LogAudit("unwrap", "", "unwrapped response", v.masterKey)
+	}))))
+	
+	// KV secret rollback endpoint.
+	mux.Handle("/secretr/kv/rollback", authMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.URL.Query().Get("key")
+		verStr := r.URL.Query().Get("version")
+		if key == "" || verStr == "" {
+			http.Error(w, "key and version parameters required", http.StatusBadRequest)
+			return
+		}
+		ver, err := strconv.Atoi(verStr)
+		if err != nil {
+			http.Error(w, "invalid version", http.StatusBadRequest)
+			return
+		}
+		if err := v.RollbackKVSecret(key, ver); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		LogAudit("kv_rollback", key, fmt.Sprintf("rolled back to version %d", ver), v.masterKey)
+	}))))
+}
+
 // StartSecureHTTPServer initializes and runs an HTTP/HTTPS server with graceful shutdown.
 func StartSecureHTTPServer(v *Secretr) {
 	mux := http.NewServeMux()
@@ -160,9 +247,9 @@ func StartSecureHTTPServer(v *Secretr) {
 	mux.Handle("/secretr/", authMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		secretrHTTPHandler(v, w, r)
 	}))))
-	// NEW: Register transit endpoints.
+	initExtraEndpoints(mux, v)
 	initTransitEndpoints(mux, v)
-
+	
 	mux.HandleFunc("/secretr/export", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
@@ -176,7 +263,7 @@ func StartSecureHTTPServer(v *Secretr) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(exp))
 	})
-
+	
 	mux.HandleFunc("/secretr/import", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
@@ -189,7 +276,7 @@ func StartSecureHTTPServer(v *Secretr) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-
+	
 	mux.HandleFunc("/secretr/group", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
@@ -209,7 +296,7 @@ func StartSecureHTTPServer(v *Secretr) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-
+	
 	mux.HandleFunc("/secretr/secret", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
@@ -231,7 +318,7 @@ func StartSecureHTTPServer(v *Secretr) {
 		}
 		w.Write([]byte(secret))
 	})
-
+	
 	mux.HandleFunc("/secretr/ssh-key", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			var req struct {
@@ -261,7 +348,7 @@ func StartSecureHTTPServer(v *Secretr) {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
-
+	
 	mux.HandleFunc("/secretr/certificate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
@@ -281,7 +368,7 @@ func StartSecureHTTPServer(v *Secretr) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-
+	
 	addr := os.Getenv("SECRETR_ADDR")
 	if addr == "" {
 		addr = ":8080"
@@ -291,7 +378,7 @@ func StartSecureHTTPServer(v *Secretr) {
 		Handler:   mux,
 		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 	}
-
+	
 	go func() {
 		certFile := os.Getenv("SECRETR_CERT")
 		keyFile := os.Getenv("SECRETR_KEY")
@@ -307,7 +394,7 @@ func StartSecureHTTPServer(v *Secretr) {
 			}
 		}
 	}()
-
+	
 	// Gracefully shutdown on termination signal.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

@@ -49,3 +49,16 @@ func BackupSecretr(v *Secretr) error {
 	filename := filepath.Join(backupDir, fmt.Sprintf("backup_%d.json", time.Now().Unix()))
 	return os.WriteFile(filename, []byte(exp), 0600)
 }
+
+// ReplicateBackup creates a backup in a specified regional directory.
+func ReplicateBackup(v *Secretr, regionDir string) error {
+	exp, err := ExportSecretr(v)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(regionDir, 0700); err != nil {
+		return err
+	}
+	filename := filepath.Join(regionDir, fmt.Sprintf("backup_%d.json", time.Now().Unix()))
+	return os.WriteFile(filename, []byte(exp), 0600)
+}

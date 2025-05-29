@@ -21,12 +21,16 @@ import (
 	"net/smtp"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
-
+	
 	"golang.org/x/term"
-
+	
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/ses"
 	"github.com/oarkflow/clipboard"
 )
 
@@ -60,13 +64,13 @@ func initStorage() error {
 	return nil
 }
 
-// NEW: Define a struct to hold SSH key pair.
+// SSHKey Define a struct to hold SSH key pair.
 type SSHKey struct {
 	Private string `json:"private"`
 	Public  string `json:"public"`
 }
 
-// NEW: SecretMeta represents a secret with versioning and lease.
+// SecretMeta represents a secret with versioning and lease.
 type SecretMeta struct {
 	Value      string            `json:"value"`
 	Version    int               `json:"version"`
@@ -75,7 +79,7 @@ type SecretMeta struct {
 	LeaseUntil time.Time         `json:"leaseUntil,omitempty"`
 }
 
-// Modify Persist: add KVSecrets field for static secret versioning.
+// Persist add KVSecrets field for static secret versioning.
 type Persist struct {
 	Data              map[string]any          `json:"data"`
 	ResetAttempts     int                     `json:"resetAttempts"`
@@ -121,12 +125,14 @@ type Secretr struct {
 
 // New creates a new Secretr instance.
 func New() *Secretr {
-	return &Secretr{
+	v := &Secretr{
 		store: NewPersist(),
 	}
+	v.leaseRevocation(time.Minute)
+	return v
 }
 
-// Added method to set GUI prompt override.
+// SetPrompt method to set GUI prompt override.
 func (v *Secretr) SetPrompt(prompt func() error) {
 	v.promptFunc = prompt
 }
@@ -178,12 +184,12 @@ func FilePath() string {
 	return filepath.Join(secretrDir, storageFile)
 }
 
-// promptMaster prompts for the MasterKey and initializes the secretr accordingly.
+// PromptMaster prompts for the MasterKey and initializes the secretr accordingly.
 func (v *Secretr) PromptMaster() error {
 	if time.Since(v.authedAt) < authCacheDuration && v.cipherGCM != nil {
 		return nil
 	}
-
+	
 	// Call the custom GUI prompt if set.
 	if v.promptFunc != nil {
 		err := v.promptFunc()
@@ -192,7 +198,7 @@ func (v *Secretr) PromptMaster() error {
 		}
 		return err
 	}
-
+	
 	// Use SECRETR_MASTERKEY from the environment if set.
 	if envKey := os.Getenv("SECRETR_MASTERKEY"); envKey != "" {
 		if _, err := os.Stat(FilePath()); os.IsNotExist(err) {
@@ -227,7 +233,7 @@ func (v *Secretr) PromptMaster() error {
 			}
 		}
 	}
-
+	
 	if v.store.EnableReset && ((!v.store.BannedUntil.IsZero() && time.Now().Before(v.store.BannedUntil)) || v.store.LockedForever) {
 		if err := v.forceReset(); err != nil {
 			return err
@@ -235,14 +241,14 @@ func (v *Secretr) PromptMaster() error {
 		v.authedAt = time.Now()
 		return nil
 	}
-
+	
 	if v.store.LockedForever {
 		return fmt.Errorf("secretr locked permanently")
 	}
 	if !v.store.BannedUntil.IsZero() && time.Now().Before(v.store.BannedUntil) {
 		return fmt.Errorf("secretr banned until %v", v.store.BannedUntil.Format(time.DateTime))
 	}
-
+	
 	if _, err := os.Stat(FilePath()); os.IsNotExist(err) {
 		for {
 			fmt.Println("Secretr database not found. Setting up a new secretr.")
@@ -337,12 +343,16 @@ func (v *Secretr) PromptMaster() error {
 func sendResetEmail(code string) {
 	emailService := os.Getenv("SECRETR_EMAIL_SERVICE")
 	resetEmail := os.Getenv("SECRETR_RESET_EMAIL")
+	if resetEmail == "" {
+		fmt.Println("Reset email not configured. Reset code:", code)
+		return
+	}
 	if emailService == "smtp" {
 		smtpServer := os.Getenv("SECRETR_SMTP_SERVER")
 		smtpPort := os.Getenv("SECRETR_SMTP_PORT")
 		smtpUser := os.Getenv("SECRETR_SMTP_USER")
 		smtpPass := os.Getenv("SECRETR_SMTP_PASS")
-		if smtpServer == "" || smtpPort == "" || smtpUser == "" || smtpPass == "" || resetEmail == "" {
+		if smtpServer == "" || smtpPort == "" || smtpUser == "" || smtpPass == "" {
 			fmt.Println("SMTP details missing. Reset code:", code)
 			return
 		}
@@ -350,15 +360,51 @@ func sendResetEmail(code string) {
 		message := "Subject: " + subject + "\n\nYour reset code is: " + code
 		auth := smtp.PlainAuth("", smtpUser, smtpPass, smtpServer)
 		addr := smtpServer + ":" + smtpPort
-		err := smtp.SendMail(addr, auth, smtpUser, []string{resetEmail}, []byte(message))
-		if err != nil {
+		if err := smtp.SendMail(addr, auth, smtpUser, []string{resetEmail}, []byte(message)); err != nil {
 			fmt.Println("Failed to send reset code via SMTP:", err)
 		} else {
 			fmt.Println("Reset code sent via SMTP.")
 		}
 	} else if emailService == "ses" {
-		// Placeholder for AWS SES integration; implement AWS SES sending logic here.
-		fmt.Println("AWS SES integration placeholder. Reset code:", code)
+		region := os.Getenv("AWS_REGION")
+		awsAccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
+		awsSecretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
+		if region == "" || awsAccessKey == "" || awsSecretKey == "" {
+			fmt.Println("AWS SES configuration missing. Reset code:", code)
+			return
+		}
+		sess, err := session.NewSession(&aws.Config{Region: aws.String(region)})
+		if err != nil {
+			fmt.Println("Failed to create AWS session:", err)
+			return
+		}
+		svc := ses.New(sess)
+		subject := "Reset Code"
+		body := "Your reset code is: " + code
+		input := &ses.SendEmailInput{
+			Destination: &ses.Destination{
+				ToAddresses: []*string{aws.String(resetEmail)},
+			},
+			Message: &ses.Message{
+				Body: &ses.Body{
+					Text: &ses.Content{
+						Charset: aws.String("UTF-8"),
+						Data:    aws.String(body),
+					},
+				},
+				Subject: &ses.Content{
+					Charset: aws.String("UTF-8"),
+					Data:    aws.String(subject),
+				},
+			},
+			Source: aws.String(resetEmail),
+		}
+		_, err = svc.SendEmail(input)
+		if err != nil {
+			fmt.Println("Failed to send reset code via AWS SES:", err)
+		} else {
+			fmt.Println("Reset code sent via AWS SES.")
+		}
 	} else {
 		fmt.Printf("Sending reset code %s to user's email...\n", code)
 	}
@@ -430,7 +476,7 @@ func (v *Secretr) Load() error {
 	if err != nil {
 		return fmt.Errorf("Invalid MasterKey or corrupt secretr file: %v", err)
 	}
-
+	
 	var persist Persist
 	if err := json.Unmarshal(plain, &persist); err != nil {
 		return err
@@ -621,7 +667,7 @@ func (v *Secretr) Delete(key string) error {
 	} else {
 		delete(v.store.Data, key)
 	}
-
+	
 	err := v.Save()
 	if err == nil {
 		LogAudit("delete", key, "deleted", v.masterKey)
@@ -640,7 +686,7 @@ func (v *Secretr) Copy(key string) error {
 
 // Env sets a secret as an environment variable.
 func (v *Secretr) Env(key string) error {
-
+	
 	secret, err := v.Get(key)
 	if err != nil {
 		return err
@@ -684,6 +730,11 @@ func (v *Secretr) initData() {
 	if v.store.Certificates == nil {
 		v.store.Certificates = make(map[string]string)
 	}
+}
+
+// Default export the default Secretr instance.
+func Default() *Secretr {
+	return defaultSecretr
 }
 
 // Execute runs the secretr CLI loop.
@@ -746,9 +797,71 @@ func cliLoop(secretr *Secretr) {
 				}
 				continue
 			}
+			// Command to generate a dynamic secret.
+			if cmd == "dynamic" {
+				if len(parts) < 3 {
+					fmt.Println("usage: dynamic <key> <lease_in_seconds>")
+				} else {
+					leaseSec, err := strconv.Atoi(parts[2])
+					if err != nil {
+						fmt.Println("invalid lease duration")
+					} else {
+						secret, err := secretr.GenerateDynamicSecret(parts[1], time.Duration(leaseSec)*time.Second)
+						if err != nil {
+							fmt.Println("error generating dynamic secret:", err)
+						} else {
+							fmt.Println("Dynamic secret for", parts[1], ":", secret)
+						}
+					}
+				}
+				continue
+			}
+			// Command to list all KV secret versions for a given key.
+			if cmd == "listkv" {
+				if len(parts) < 2 {
+					fmt.Println("usage: listkv <key>")
+				} else {
+					versions, err := secretr.ListKVSecretVersions(parts[1])
+					if err != nil {
+						fmt.Println("error:", err)
+					} else {
+						b, _ := json.MarshalIndent(versions, "", "  ")
+						fmt.Println(string(b))
+					}
+				}
+				continue
+			}
+			// Command to rollback a KV secret to a specific version.
+			if cmd == "rollbackkv" {
+				if len(parts) < 3 {
+					fmt.Println("usage: rollbackkv <key> <version>")
+				} else {
+					versionIdx, err := strconv.Atoi(parts[2])
+					if err != nil {
+						fmt.Println("invalid version index")
+					} else {
+						if err := secretr.RollbackKVSecret(parts[1], versionIdx); err != nil {
+							fmt.Println("error:", err)
+						} else {
+							fmt.Println("Rollback successful")
+						}
+					}
+				}
+				continue
+			}
+			// Command to display the entire store (all secrets stored in v.store)
+			if cmd == "store" {
+				b, err := json.MarshalIndent(secretr.store, "", "  ")
+				if err != nil {
+					fmt.Println("error:", err)
+				} else {
+					fmt.Println(string(b))
+				}
+				continue
+			}
 		}
 		if len(parts) < 2 {
-			fmt.Println("usage: set|get|delete|copy|env|enrich|list|ssh-key|certificate|sign|verify|hash key [value]")
+			fmt.Println("usage: set|get|delete|copy|env|enrich|list|listkv|rollbackkv|store|ssh-key|certificate|sign|verify|hash key [value]")
 			continue
 		}
 		op, key := strings.ToLower(parts[0]), parts[1]
@@ -784,7 +897,7 @@ func cliLoop(secretr *Secretr) {
 				fmt.Println("error:", err)
 			}
 		case "env":
-
+			
 			if err := secretr.Env(key); err != nil {
 				fmt.Println("error:", err)
 			} else {
@@ -1044,13 +1157,13 @@ func GenerateSSHKeyPair() (string, string, error) {
 		return "", "", fmt.Errorf("failed to marshal private key: %v", err)
 	}
 	privatePEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privateKeyBytes})
-
+	
 	publicKeyBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to marshal public key: %v", err)
 	}
 	publicPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicKeyBytes})
-
+	
 	return string(privatePEM), string(publicPEM), nil
 }
 
@@ -1146,7 +1259,7 @@ func readMultilineFromStdin(reader *bufio.Reader) string {
 	return strings.Join(lines, "\n")
 }
 
-// Updated EditSSHKeyCLI to offer the same option.
+// EditSSHKeyCLI to offer the same option.
 func (v *Secretr) EditSSHKeyCLI(name string) error {
 	reader := bufio.NewReader(os.Stdin)
 	ssh, exists := v.store.SSHKeys[name]
@@ -1188,7 +1301,7 @@ func (v *Secretr) EditSSHKeyCLI(name string) error {
 	return v.Save()
 }
 
-// Updated RevealSSHKeyCLI to show keys in two separate sections.
+// RevealSSHKeyCLI to show keys in two separate sections.
 func (v *Secretr) RevealSSHKeyCLI(name string) {
 	ssh, exists := v.store.SSHKeys[name]
 	if !exists {
@@ -1203,19 +1316,19 @@ func (v *Secretr) RevealSSHKeyCLI(name string) {
 	fmt.Println(publicKey)
 }
 
-// Updated DeleteSSHKeyCLI to show keys in two separate sections.
+// DeleteSSHKeyCLI to show keys in two separate sections.
 func (v *Secretr) DeleteSSHKeyCLI(name string) {
 	delete(v.store.SSHKeys, name)
 }
 
-// NEW: Helper function to generate a random hex string of specified length.
+// Helper function to generate a random hex string of specified length.
 func generateRandomString(length int) string {
 	b := make([]byte, length/2)
 	_, _ = rand.Read(b)
 	return fmt.Sprintf("%x", b)
 }
 
-// NEW: GenerateDynamicSecret creates a dynamic secret, leased until leaseDuration.
+// GenerateDynamicSecret creates a dynamic secret, leased until leaseDuration.
 func (v *Secretr) GenerateDynamicSecret(name string, leaseDuration time.Duration) (string, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -1237,7 +1350,7 @@ func (v *Secretr) GenerateDynamicSecret(name string, leaseDuration time.Duration
 	return secret, nil
 }
 
-// NEW: TransitEncrypt encrypts the plaintext using AES-GCM, returning a base64 encoded string.
+// TransitEncrypt encrypts the plaintext using AES-GCM, returning a base64 encoded string.
 func (v *Secretr) TransitEncrypt(plaintext string) (string, error) {
 	if v.cipherGCM == nil {
 		return "", fmt.Errorf("cipher not initialized")
@@ -1250,7 +1363,7 @@ func (v *Secretr) TransitEncrypt(plaintext string) (string, error) {
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-// NEW: TransitDecrypt decrypts the given base64 encoded ciphertext using AES-GCM.
+// TransitDecrypt decrypts the given base64 encoded ciphertext using AES-GCM.
 func (v *Secretr) TransitDecrypt(encText string) (string, error) {
 	if v.cipherGCM == nil {
 		return "", fmt.Errorf("cipher not initialized")
@@ -1268,4 +1381,36 @@ func (v *Secretr) TransitDecrypt(encText string) (string, error) {
 		return "", err
 	}
 	return string(plaintext), nil
+}
+
+// ListKVSecretVersions List all versions for a given static (KV) secret.
+func (v *Secretr) ListKVSecretVersions(key string) ([]SecretMeta, error) {
+	if v.store.KVSecrets == nil {
+		return nil, fmt.Errorf("no KV secrets stored")
+	}
+	versions, ok := v.store.KVSecrets[key]
+	if !ok || len(versions) == 0 {
+		return nil, fmt.Errorf("no versions found for key %s", key)
+	}
+	return versions, nil
+}
+
+// RollbackKVSecret Rollback the KV secret to a specified version index.
+func (v *Secretr) RollbackKVSecret(key string, versionIndex int) error {
+	versions, err := v.ListKVSecretVersions(key)
+	if err != nil {
+		return err
+	}
+	if versionIndex < 0 || versionIndex >= len(versions) {
+		return fmt.Errorf("invalid version index")
+	}
+	// set the chosen version as the active value in the static store.
+	v.store.Data[key] = versions[versionIndex].Value
+	// remove any versions after the rollback point.
+	v.store.KVSecrets[key] = versions[:versionIndex+1]
+	if err := v.Save(); err != nil {
+		return err
+	}
+	LogAudit("kv_rollback", key, fmt.Sprintf("rolled back to version %d", versionIndex), v.masterKey)
+	return nil
 }

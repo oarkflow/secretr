@@ -8,4 +8,9 @@ require (
 	golang.org/x/term v0.32.0
 )
 
-require golang.org/x/sys v0.33.0 // indirect
+require github.com/jmespath/go-jmespath v0.4.0 // indirect
+
+require (
+	github.com/aws/aws-sdk-go v1.55.7
+	golang.org/x/sys v0.33.0 // indirect
+)

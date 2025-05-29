@@ -70,3 +70,17 @@ func TransitDecrypt(encText string) (string, error) {
 	}
 	return defaultSecretr.TransitDecrypt(encText)
 }
+
+func ListKVSecretVersions(val string) ([]SecretMeta, error) {
+	if defaultSecretr == nil {
+		return nil, fmt.Errorf("secretr not initialized")
+	}
+	return defaultSecretr.ListKVSecretVersions(val)
+}
+
+func RollbackKVSecret(key string, versionIndex int) error {
+	if defaultSecretr == nil {
+		return fmt.Errorf("secretr not initialized")
+	}
+	return defaultSecretr.RollbackKVSecret(key, versionIndex)
+}
