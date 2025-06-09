@@ -34,9 +34,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/ses"
 	"github.com/oarkflow/clipboard"
 
-	"github.com/oarkflow/secretr/shamir"
-	"github.com/oarkflow/secretr/storage"
-	"github.com/oarkflow/secretr/storage/drivers"
+	"github.com/oarkflow/shamir"
+	"github.com/oarkflow/shamir/storage"
+	"github.com/oarkflow/shamir/storage/drivers"
 )
 
 var (
@@ -190,7 +190,7 @@ func (v *Secretr) distributeMasterKey(masterKey []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to split master key: %v", err)
 	}
-	ms := storage.New()
+	ms := storage.NewMultiStorage()
 	fileStorage, err := drivers.NewFileStorage(masterKeyDir)
 	if err != nil {
 		return fmt.Errorf("failed to create file storage for master key shares: %v", err)
