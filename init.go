@@ -13,11 +13,29 @@ func Set(key string, value any) error {
 	return defaultSecretr.Set(key, value)
 }
 
+func MustSet(key string, value any) {
+	if defaultSecretr == nil {
+		log.Fatal("secretr not initialized")
+	}
+	if err := defaultSecretr.Set(key, value); err != nil {
+		log.Fatalf("failed to set key %s: %v", key, err)
+	}
+}
+
 func Copy(key string) error {
 	if defaultSecretr == nil {
 		return fmt.Errorf("secretr not initialized")
 	}
 	return defaultSecretr.Copy(key)
+}
+
+func MustCopy(key string) {
+	if defaultSecretr == nil {
+		log.Fatal("secretr not initialized")
+	}
+	if err := defaultSecretr.Copy(key); err != nil {
+		log.Fatalf("failed to copy key %s: %v", key, err)
+	}
 }
 
 func Delete(key string) error {
@@ -27,12 +45,32 @@ func Delete(key string) error {
 	return defaultSecretr.Delete(key)
 }
 
+func MustDelete(key string) {
+	if defaultSecretr == nil {
+		log.Fatal("secretr not initialized")
+	}
+	if err := defaultSecretr.Delete(key); err != nil {
+		log.Fatalf("failed to delete key %s: %v", key, err)
+	}
+}
+
 // Get retrieves the value associated with the provided key.
 func Get(key string) (string, error) {
 	if defaultSecretr == nil {
 		return "", fmt.Errorf("secretr not initialized")
 	}
 	return defaultSecretr.Get(key)
+}
+
+func MustGet(key string) string {
+	if defaultSecretr == nil {
+		log.Fatal("secretr not initialized")
+	}
+	value, err := defaultSecretr.Get(key)
+	if err != nil {
+		log.Fatalf("failed to get key %s: %v", key, err)
+	}
+	return value
 }
 
 func Unmarshal(key string, dest any) error {
