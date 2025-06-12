@@ -1421,14 +1421,16 @@ func (v *Secretr) DeleteSSHKeyCLI(name string) {
 	delete(v.store.SSHKeys, name)
 }
 
-var src = mathRand.NewSource(time.Now().UnixNano())
-
 const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._$~"
+const safeStartBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
 const (
 	letterIdxBits = 6                    // 6 bits to represent a letter index
 	letterIdxMask = 1<<letterIdxBits - 1 // All 1-bits, as many as letterIdxBits
 	letterIdxMax  = 63 / letterIdxBits   // # of letter indices fitting in 63 bits
 )
+
+var src = mathRand.New(mathRand.NewSource(time.Now().UnixNano()))
 
 func GenerateRandomString(length ...int) string {
 	n := 32 // Default length
@@ -1439,8 +1441,12 @@ func GenerateRandomString(length ...int) string {
 		n = 32 // Ensure at least 1 character
 	}
 	b := make([]byte, n)
-	// A src.Int63() generates 63 random bits, enough for letterIdxMax characters!
-	for i, cache, remain := n-1, src.Int63(), letterIdxMax; i >= 0; {
+
+	// Ensure first character is from safeStartBytes
+	b[0] = safeStartBytes[src.Intn(len(safeStartBytes))]
+
+	// Fill the rest with full character set
+	for i, cache, remain := n-1, src.Int63(), letterIdxMax; i > 0; {
 		if remain == 0 {
 			cache, remain = src.Int63(), letterIdxMax
 		}
@@ -1456,10 +1462,14 @@ func GenerateRandomString(length ...int) string {
 }
 
 // GenerateDynamicSecret creates a dynamic secret with a lease.
-func (v *Secretr) GenerateDynamicSecret(name string, leaseDuration time.Duration) (string, error) {
+func (v *Secretr) GenerateDynamicSecret(name string, leaseDuration time.Duration, length ...int) (string, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	secret := GenerateRandomString(32)
+	secretLength := 32
+	if len(length) > 0 {
+		secretLength = length[0]
+	}
+	secret := GenerateRandomString(secretLength)
 	leaseUntil := time.Now().Add(leaseDuration)
 	meta := SecretMeta{
 		Value:      secret,
@@ -1475,6 +1485,24 @@ func (v *Secretr) GenerateDynamicSecret(name string, leaseDuration time.Duration
 		return "", err
 	}
 	return secret, nil
+}
+
+func (v *Secretr) VerifyDynamicSecret(name, secret string) (bool, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.store.KVSecrets == nil {
+		return false, fmt.Errorf("no dynamic secrets stored")
+	}
+	versions, ok := v.store.KVSecrets[name]
+	if !ok || len(versions) == 0 {
+		return false, fmt.Errorf("no versions found for key %s", name)
+	}
+	for _, version := range versions {
+		if version.Value == secret && time.Now().Before(version.LeaseUntil) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // TransitEncrypt and TransitDecrypt offer encryption as a service.

@@ -95,6 +95,13 @@ func GenerateDynamicSecret(name string, leaseDuration time.Duration) (string, er
 	return defaultSecretr.GenerateDynamicSecret(name, leaseDuration)
 }
 
+func VerifyDynamicSecret(name, secret string) (bool, error) {
+	if defaultSecretr == nil {
+		return false, fmt.Errorf("secretr not initialized")
+	}
+	return defaultSecretr.VerifyDynamicSecret(name, secret)
+}
+
 func TransitEncrypt(plaintext string) (string, error) {
 	if defaultSecretr == nil {
 		return "", fmt.Errorf("secretr not initialized")
@@ -149,6 +156,13 @@ func Env(key string) error {
 		return fmt.Errorf("secretr not initialized")
 	}
 	return defaultSecretr.Env(key)
+}
+
+func EnrichEnv() error {
+	if defaultSecretr == nil {
+		return fmt.Errorf("secretr not initialized")
+	}
+	return defaultSecretr.EnrichEnv()
 }
 
 func GenerateSSHKey(key string) error {

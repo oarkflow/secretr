@@ -370,7 +370,7 @@ func StartSecureHTTPServer(v *Secretr) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	addr := os.Getenv("SECRETR_ADDR")
+	addr := os.Getenv("SECRETR_HTTP_ADDR")
 	if addr == "" {
 		addr = ":8080"
 	}
@@ -381,8 +381,8 @@ func StartSecureHTTPServer(v *Secretr) {
 	}
 
 	go func() {
-		certFile := os.Getenv("SECRETR_CERT")
-		keyFile := os.Getenv("SECRETR_KEY")
+		certFile := os.Getenv("SECRETR_HTTP_CERT")
+		keyFile := os.Getenv("SECRETR_HTTP_KEY")
 		if certFile != "" && keyFile != "" {
 			log.Println("Starting HTTPS server on", addr)
 			if err := server.ListenAndServeTLS(certFile, keyFile); err != nil && !errors.Is(err, http.ErrServerClosed) {

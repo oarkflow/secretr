@@ -204,7 +204,7 @@ import (
 
 func main() {
 	v := secretr.New()
-	// Set environment variables SECRETR_CERT and SECRETR_KEY with certificate file paths.
+	// Set environment variables SECRETR_HTTP_CERT and SECRETR_HTTP_KEY with certificate file paths.
 	// The server will automatically serve HTTPS if these variables are set.
 	secretr.StartSecureHTTPServer(v)
 }
