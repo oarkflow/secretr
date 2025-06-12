@@ -81,7 +81,7 @@ func SetMasterKeyShares(shares int) {
 func initStorage() error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("Error getting home directory: %v", err)
+		return fmt.Errorf("error getting home directory: %v", err)
 	}
 	if secretrDir == "" {
 		secretrDir = filepath.Join(homeDir, ".secretr")
@@ -89,7 +89,7 @@ func initStorage() error {
 	if _, err := os.Stat(secretrDir); os.IsNotExist(err) {
 		err = os.MkdirAll(secretrDir, 0700)
 		if err != nil {
-			return fmt.Errorf("Error creating .secretr directory: %v", err)
+			return fmt.Errorf("error creating .secretr directory: %v", err)
 		}
 	}
 	if masterKeyDir == "" {
@@ -98,7 +98,7 @@ func initStorage() error {
 	if _, err := os.Stat(masterKeyDir); os.IsNotExist(err) {
 		err = os.MkdirAll(masterKeyDir, 0700)
 		if err != nil {
-			return fmt.Errorf("Error creating .secretr directory: %v", err)
+			return fmt.Errorf("error creating .secretr directory: %v", err)
 		}
 	}
 	return nil
@@ -230,7 +230,7 @@ func (v *Secretr) validateMasterKey(masterKey []byte) error {
 func (v *Secretr) InitCipher(pw []byte, salt []byte) {
 	if salt == nil {
 		salt = make([]byte, saltSize)
-		rand.Read(salt)
+		_, _ = rand.Read(salt)
 	}
 	v.salt = salt
 	key := DeriveKey(pw, salt)
@@ -416,7 +416,7 @@ func (v *Secretr) PromptMaster() error {
 					if v.store.EnableReset {
 						if v.store.ResetCode == "" {
 							var num int64
-							binary.Read(rand.Reader, binary.BigEndian, &num)
+							_ = binary.Read(rand.Reader, binary.BigEndian, &num)
 							v.store.ResetCode = fmt.Sprintf("%06d", num%1000000)
 							sendResetEmail(v.store.ResetCode)
 							fmt.Println("Too many attempts. Reset code has been sent to your email.")
@@ -425,7 +425,7 @@ func (v *Secretr) PromptMaster() error {
 					} else {
 						v.store.BannedUntil = time.Now().Add(10 * time.Minute)
 						fmt.Printf("Too many attempts. Secretr is banned until %v.\n", v.store.BannedUntil.Format(time.DateTime))
-						v.Save()
+						_ = v.Save()
 						return fmt.Errorf("failed to authenticate: secretr banned until %v", v.store.BannedUntil)
 					}
 				}
@@ -513,7 +513,7 @@ func sendResetEmail(code string) {
 func (v *Secretr) forceReset() error {
 	if v.store.ResetCode == "" {
 		var num int64
-		binary.Read(rand.Reader, binary.BigEndian, &num)
+		_ = binary.Read(rand.Reader, binary.BigEndian, &num)
 		v.store.ResetCode = fmt.Sprintf("%06d", num%1000000)
 		sendResetEmail(v.store.ResetCode)
 		fmt.Println("Secretr is banned/locked. Reset code has been sent to your email.")
@@ -573,7 +573,7 @@ func (v *Secretr) Load() error {
 	ciphertext := data[v.nonceSize:]
 	plain, err := v.cipherGCM.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return fmt.Errorf("Invalid MasterKey or corrupt secretr file: %v", err)
+		return fmt.Errorf("invalid MasterKey or corrupt secretr file: %v", err)
 	}
 
 	var persist Persist
@@ -691,7 +691,7 @@ func (v *Secretr) Get(key string) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("key %s not found", key)
 		}
-		var current any = node
+		var current = node
 		for _, k := range subkeys {
 			if m, ok := current.(map[string]any); ok {
 				current, ok = m[k]
@@ -877,9 +877,9 @@ func cliLoop(secretr *Secretr) {
 		if len(parts) > 0 {
 			cmd := strings.ToLower(parts[0])
 			if cmd == "exit" || cmd == "quit" {
-				secretr.Save()
+				_ = secretr.Save()
 				fmt.Println("Exiting secretr CLI.")
-				clipboard.WriteAll("")
+				_ = clipboard.WriteAll("")
 				return
 			}
 			if cmd == "list" {
@@ -1434,7 +1434,8 @@ func GenerateRandomString(length ...int) string {
 	n := 32 // Default length
 	if len(length) > 0 {
 		n = length[0]
-	} else if n < 1 {
+	}
+	if n < 1 {
 		n = 32 // Ensure at least 1 character
 	}
 	b := make([]byte, n)

@@ -13,7 +13,7 @@ func (v *Secretr) leaseRevocation(interval time.Duration) {
 			v.mu.Lock()
 			now := time.Now()
 			for key, versions := range v.store.KVSecrets {
-				newVersions := []SecretMeta{}
+				var newVersions []SecretMeta
 				revoked := false
 				for _, meta := range versions {
 					if meta.LeaseUntil.Before(now) {

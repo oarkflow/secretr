@@ -7,7 +7,7 @@ require (
 	github.com/coreos/go-oidc v2.3.0+incompatible
 	github.com/go-ldap/ldap/v3 v3.4.11
 	github.com/oarkflow/clipboard v0.0.1
-	github.com/oarkflow/shamir v0.0.1
+	github.com/oarkflow/shamir v0.0.2
 	golang.org/x/crypto v0.39.0
 	golang.org/x/term v0.32.0
 	k8s.io/apimachinery v0.33.1

@@ -11,7 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/coreos/go-oidc"
-	ldap "github.com/go-ldap/ldap/v3"
+	"github.com/go-ldap/ldap/v3"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -86,7 +86,7 @@ func (la *LDAPAuth) Authenticate(credentials map[string]string) (string, error) 
 	}
 	defer conn.Close()
 	if la.TLS {
-		conn.StartTLS(&tls.Config{InsecureSkipVerify: la.SkipVerifyTLS})
+		_ = conn.StartTLS(&tls.Config{InsecureSkipVerify: la.SkipVerifyTLS})
 	}
 	// Initial bind (anonymous or service account)
 	// Search for user's DN

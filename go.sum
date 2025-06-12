@@ -78,8 +78,8 @@ github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
 github.com/oarkflow/clipboard v0.0.1 h1:qOXFiZWbNiaPDAl1uUFlJyBzndUrh79bvCtmzExArQo=
 github.com/oarkflow/clipboard v0.0.1/go.mod h1:wlSZ3qExDG/sAco7QLOeAWtY/svukGY74e5b3Bm90eE=
-github.com/oarkflow/shamir v0.0.1 h1:iStVjsr6MBRhLrYChHUtgH+3H8B/Svsyj94A01R9ATI=
-github.com/oarkflow/shamir v0.0.1/go.mod h1:p62l6V+YPhitBC5dr6+Y+a/+Bp8ggQ7YN0YHanedojw=
+github.com/oarkflow/shamir v0.0.2 h1:u4FO7xHX/O5px/bGN7Axf51XZCS8wfoaZgYRT14AvPE=
+github.com/oarkflow/shamir v0.0.2/go.mod h1:p62l6V+YPhitBC5dr6+Y+a/+Bp8ggQ7YN0YHanedojw=
 github.com/onsi/ginkgo/v2 v2.21.0 h1:7rg/4f3rB88pb5obDgNZrNHrQ4e6WpjonchcpuBRnZM=
 github.com/onsi/ginkgo/v2 v2.21.0/go.mod h1:7Du3c42kxCUegi0IImZ1wUQzMBVecgIHjR1C+NkhLQo=
 github.com/onsi/gomega v1.35.1 h1:Cwbd75ZBPxFSuZ6T+rN/WCb/gOc6YgFBXLlZLhC7Ds4=

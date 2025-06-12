@@ -110,7 +110,7 @@ func ImportSecretr(v *Secretr, encryptedData string) error {
 // BackupSecretr creates a backup file containing the secretr export (encrypted).
 func BackupSecretr(v *Secretr) error {
 	backupDir := filepath.Join(secretrDir, "backups")
-	os.MkdirAll(backupDir, 0700)
+	_ = os.MkdirAll(backupDir, 0700)
 	exp, err := ExportSecretr(v)
 	if err != nil {
 		return err

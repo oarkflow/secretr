@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -70,16 +71,16 @@ func secretrHTTPHandler(v *Secretr, w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(key, "dynamic/"):
 		name := strings.TrimPrefix(key, "dynamic/")
 		leaseStr := r.URL.Query().Get("lease")
-		leaseSec, err := time.ParseDuration(leaseStr + "s")
-		if err != nil || leaseSec <= 0 {
-			leaseSec = time.Minute * 10 // default lease duration
+		lease, err := time.ParseDuration(leaseStr + "s")
+		if err != nil || lease <= 0 {
+			lease = time.Minute * 10 // default lease duration
 		}
-		secret, err := v.GenerateDynamicSecret(name, leaseSec)
+		secret, err := v.GenerateDynamicSecret(name, lease)
 		if err != nil {
 			http.Error(w, "failed to generate dynamic secret: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.Write([]byte(secret))
+		_, _ = w.Write([]byte(secret))
 		LogAudit("dynamic", name, "generated dynamic secret", v.masterKey)
 		return
 
@@ -97,7 +98,7 @@ func secretrHTTPHandler(v *Secretr, w http.ResponseWriter, r *http.Request) {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			w.Write([]byte(val))
+			_, _ = w.Write([]byte(val))
 			LogAudit("get", key, "retrieved", v.masterKey)
 		case http.MethodPost, http.MethodPut:
 			body, _ := io.ReadAll(r.Body)
@@ -133,7 +134,7 @@ func initTransitEndpoints(mux *http.ServeMux, v *Secretr) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.Write([]byte(encrypted))
+		_, _ = w.Write([]byte(encrypted))
 		LogAudit("transit_encrypt", "", "encrypted data", v.masterKey)
 	})
 	mux.HandleFunc("/secretr/transit/decrypt", func(w http.ResponseWriter, r *http.Request) {
@@ -147,7 +148,7 @@ func initTransitEndpoints(mux *http.ServeMux, v *Secretr) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.Write([]byte(decrypted))
+		_, _ = w.Write([]byte(decrypted))
 		LogAudit("transit_decrypt", "", "decrypted data", v.masterKey)
 	})
 }
@@ -182,7 +183,7 @@ func initExtraEndpoints(mux *http.ServeMux, v *Secretr) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		w.Write([]byte(token))
+		_, _ = w.Write([]byte(token))
 		LogAudit("cloud_engine", provider, "generated cloud token", v.masterKey)
 	}))))
 
@@ -198,7 +199,7 @@ func initExtraEndpoints(mux *http.ServeMux, v *Secretr) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.Write([]byte(token))
+		_, _ = w.Write([]byte(token))
 		LogAudit("wrap", "", "wrapped response", v.masterKey)
 	}))))
 
@@ -213,7 +214,7 @@ func initExtraEndpoints(mux *http.ServeMux, v *Secretr) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.Write([]byte(plain))
+		_, _ = w.Write([]byte(plain))
 		LogAudit("unwrap", "", "unwrapped response", v.masterKey)
 	}))))
 
@@ -261,7 +262,7 @@ func StartSecureHTTPServer(v *Secretr) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(exp))
+		_, _ = w.Write([]byte(exp))
 	})
 
 	mux.HandleFunc("/secretr/import", func(w http.ResponseWriter, r *http.Request) {
@@ -316,7 +317,7 @@ func StartSecureHTTPServer(v *Secretr) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.Write([]byte(secret))
+		_, _ = w.Write([]byte(secret))
 	})
 
 	mux.HandleFunc("/secretr/ssh-key", func(w http.ResponseWriter, r *http.Request) {
@@ -343,7 +344,7 @@ func StartSecureHTTPServer(v *Secretr) {
 				return
 			}
 			res := v.store.SSHKeys[name]
-			json.NewEncoder(w).Encode(res)
+			_ = json.NewEncoder(w).Encode(res)
 		} else {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -384,12 +385,12 @@ func StartSecureHTTPServer(v *Secretr) {
 		keyFile := os.Getenv("SECRETR_KEY")
 		if certFile != "" && keyFile != "" {
 			log.Println("Starting HTTPS server on", addr)
-			if err := server.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+			if err := server.ListenAndServeTLS(certFile, keyFile); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Fatalf("HTTPS server error: %v", err)
 			}
 		} else {
 			log.Println("Starting HTTP server on", addr)
-			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Fatalf("HTTP server error: %v", err)
 			}
 		}

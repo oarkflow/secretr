@@ -23,12 +23,14 @@ func LogAudit(operation, key, details string, masterKey []byte) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 	timestamp := time.Now().Format(time.RFC3339)
 	data := fmt.Sprintf("%s|%s|%s|%s", timestamp, operation, key, details)
 	mac := hmac.New(sha256.New, masterKey)
 	mac.Write([]byte(data))
 	signature := hex.EncodeToString(mac.Sum(nil))
 	line := fmt.Sprintf("%s|%s\n", data, signature)
-	f.WriteString(line)
+	_, _ = f.WriteString(line)
 }
