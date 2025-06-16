@@ -2,6 +2,7 @@ package secretr
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdsa"
@@ -12,6 +13,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/csv"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -37,6 +39,7 @@ import (
 	"github.com/oarkflow/shamir"
 	"github.com/oarkflow/shamir/storage"
 	"github.com/oarkflow/shamir/storage/drivers"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -865,7 +868,85 @@ func (v *Secretr) LoadFromEnv() {
 	}
 }
 
-// cliLoop handles the interactive CLI commands.
+// ImportFile to import secrets from various file formats.
+func (v *Secretr) ImportFile(format, filePath string) error {
+	v.initData()
+	fileContent, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+	switch format {
+	case "csv":
+		r := csv.NewReader(bytes.NewReader(fileContent))
+		records, err := r.ReadAll()
+		if err != nil {
+			return err
+		}
+		for _, record := range records {
+			if len(record) < 2 {
+				continue
+			}
+			key, value := strings.TrimSpace(record[0]), strings.TrimSpace(record[1])
+			if key != "" {
+				v.store.Data[key] = value
+			}
+		}
+	case "tsv":
+		r := csv.NewReader(bytes.NewReader(fileContent))
+		r.Comma = '\t'
+		records, err := r.ReadAll()
+		if err != nil {
+			return err
+		}
+		for _, record := range records {
+			if len(record) < 2 {
+				continue
+			}
+			key, value := strings.TrimSpace(record[0]), strings.TrimSpace(record[1])
+			if key != "" {
+				v.store.Data[key] = value
+			}
+		}
+	case "json":
+		var data map[string]any
+		if err := json.Unmarshal(fileContent, &data); err != nil {
+			return err
+		}
+		for k, v2 := range data {
+			v.store.Data[k] = v2
+		}
+	case ".env":
+		lines := strings.Split(string(fileContent), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			k := strings.TrimSpace(parts[0])
+			vVal := strings.TrimSpace(parts[1])
+			if k != "" {
+				v.store.Data[k] = vVal
+			}
+		}
+	case "yaml", "yml":
+		var data map[string]any
+		if err := yaml.Unmarshal(fileContent, &data); err != nil {
+			return err
+		}
+		for k, v2 := range data {
+			v.store.Data[k] = v2
+		}
+	default:
+		return fmt.Errorf("unsupported import format: %s", format)
+	}
+	return v.Save()
+}
+
+// Modify cliLoop to support the import command.
 func cliLoop(secretr *Secretr) {
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
@@ -894,6 +975,20 @@ func cliLoop(secretr *Secretr) {
 					fmt.Println("error:", err)
 				} else {
 					fmt.Println("Secretr secrets enriched into environment variables.")
+				}
+				continue
+			}
+			if cmd == "import" {
+				if len(parts) < 3 {
+					fmt.Println("usage: import <format> <filepath>")
+					continue
+				}
+				format := strings.ToLower(parts[1])
+				filePath := parts[2]
+				if err := secretr.ImportFile(format, filePath); err != nil {
+					fmt.Println("import error:", err)
+				} else {
+					fmt.Println("Import successful")
 				}
 				continue
 			}
