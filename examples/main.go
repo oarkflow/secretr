@@ -168,7 +168,14 @@ func exampleAllFunctions() {
 func main() {
 	os.Setenv("SECRETR_MASTERKEY", "test1234")
 	os.Setenv("SECRETR_KEY", secretr.GenerateRandomString())
-
+	v := secretr.New()
+	v.SetDistributeKey(false)
+	err := v.PromptMaster()
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	fmt.Println(v.List())
 	// Retrieve some existing secrets (if set).
 	openAIKey := secretr.MustGet("OPENAI_KEY")
 	deepSeekKey := secretr.MustGet("DEEPSEEK_KEY")
@@ -176,7 +183,7 @@ func main() {
 	fmt.Println("DEEPSEEK_KEY =", deepSeekKey)
 
 	// Execute the consolidated example to demonstrate all functions.
-	exampleAllFunctions()
+	// exampleAllFunctions()
 
 	fmt.Println("All examples executed successfully.")
 }

@@ -62,6 +62,14 @@ func Get(key string) (string, error) {
 	return defaultSecretr.Get(key)
 }
 
+// List retrieves the value associated with the provided key.
+func List() ([]string, error) {
+	if defaultSecretr == nil {
+		return nil, fmt.Errorf("secretr not initialized")
+	}
+	return defaultSecretr.List(), nil
+}
+
 func MustGet(key string) string {
 	if defaultSecretr == nil {
 		log.Fatal("secretr not initialized")

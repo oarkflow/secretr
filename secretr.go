@@ -185,6 +185,11 @@ func (v *Secretr) SetPrompt(prompt func() error) {
 	v.promptFunc = prompt
 }
 
+// SetDistributeKey method to set GUI prompt override.
+func (v *Secretr) SetDistributeKey(key bool) {
+	v.distributeKey = key
+}
+
 func (v *Secretr) distributeMasterKey(masterKey []byte) error {
 	if !v.distributeKey {
 		return nil
@@ -842,7 +847,7 @@ func Default() *Secretr {
 // Execute runs the secretr CLI loop.
 func Execute(distributeKey bool) {
 	secretr := New()
-	secretr.distributeKey = distributeKey
+	secretr.SetDistributeKey(distributeKey)
 	err := secretr.PromptMaster()
 	if err != nil {
 		fmt.Println("Error:", err)

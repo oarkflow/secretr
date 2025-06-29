@@ -54,73 +54,6 @@ func rateLimitMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// resetRateLimiter periodically resets the rate limiter counts.
-func resetRateLimiter() {
-	for {
-		time.Sleep(time.Minute)
-		limMu.Lock()
-		limiter = make(map[string]int)
-		limMu.Unlock()
-	}
-}
-
-// secretrHTTPHandler processes HTTP requests for secretr operations.
-func secretrHTTPHandler(v *Secretr, w http.ResponseWriter, r *http.Request) {
-	key := strings.TrimPrefix(r.URL.Path, "/secretr/")
-	switch {
-	case strings.HasPrefix(key, "dynamic/"):
-		name := strings.TrimPrefix(key, "dynamic/")
-		leaseStr := r.URL.Query().Get("lease")
-		lease, err := time.ParseDuration(leaseStr + "s")
-		if err != nil || lease <= 0 {
-			lease = time.Minute * 10 // default lease duration
-		}
-		secret, err := v.GenerateDynamicSecret(name, lease)
-		if err != nil {
-			http.Error(w, "failed to generate dynamic secret: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		_, _ = w.Write([]byte(secret))
-		LogAudit("dynamic", name, "generated dynamic secret", v.masterKey)
-		return
-
-	// handling other cases...
-	case key == "" || key == "keys":
-		keys := v.List()
-		_ = json.NewEncoder(w).Encode(keys)
-		LogAudit("list", "", "listed keys", v.masterKey)
-		return
-	default:
-		switch r.Method {
-		case http.MethodGet:
-			val, err := v.Get(key)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusNotFound)
-				return
-			}
-			_, _ = w.Write([]byte(val))
-			LogAudit("get", key, "retrieved", v.masterKey)
-		case http.MethodPost, http.MethodPut:
-			body, _ := io.ReadAll(r.Body)
-			if err := v.Set(key, string(body)); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			w.WriteHeader(http.StatusNoContent)
-			LogAudit("set", key, "updated", v.masterKey)
-		case http.MethodDelete:
-			if err := v.Delete(key); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			w.WriteHeader(http.StatusNoContent)
-			LogAudit("delete", key, "deleted", v.masterKey)
-		default:
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		}
-	}
-}
-
 // NEW: Transit engine endpoints.
 func initTransitEndpoints(mux *http.ServeMux, v *Secretr) {
 	mux.HandleFunc("/secretr/transit/encrypt", func(w http.ResponseWriter, r *http.Request) {
@@ -151,11 +84,7 @@ func initTransitEndpoints(mux *http.ServeMux, v *Secretr) {
 		_, _ = w.Write([]byte(decrypted))
 		LogAudit("transit_decrypt", "", "decrypted data", v.masterKey)
 	})
-}
 
-// NEW: Additional API endpoints for secret engines, response wrapping and KV rollback.
-func initExtraEndpoints(mux *http.ServeMux, v *Secretr) {
-	// Dynamic Database Credentials engine
 	mux.Handle("/secretr/engine/db", authMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		engine := r.URL.Query().Get("engine")
 		if engine == "" {
@@ -238,24 +167,107 @@ func initExtraEndpoints(mux *http.ServeMux, v *Secretr) {
 		w.WriteHeader(http.StatusNoContent)
 		LogAudit("kv_rollback", key, fmt.Sprintf("rolled back to version %d", ver), v.masterKey)
 	}))))
-}
 
-// StartSecureHTTPServer initializes and runs an HTTP/HTTPS server with graceful shutdown.
-func StartSecureHTTPServer(v *Secretr) {
-	mux := http.NewServeMux()
-	// Protect endpoints with auth and rate-limiting middleware.
-	// Register dynamic secrets endpoint within secretrHTTPHandler.
-	mux.Handle("/secretr/", authMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		secretrHTTPHandler(v, w, r)
+	mux.Handle("/secretr/", userAuthMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		robustSecretrHTTPHandler(v, w, r)
 	}))))
-	initExtraEndpoints(mux, v)
-	initTransitEndpoints(mux, v)
 
-	mux.HandleFunc("/secretr/export", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "Only GET allowed", http.StatusMethodNotAllowed)
+	// List all keys
+	mux.Handle("/secretr/list", userAuthMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		keys := v.List()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(keys)
+	}))))
+
+	// KV secret versioning
+	mux.Handle("/secretr/kv/versions", userAuthMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.URL.Query().Get("key")
+		versions, err := v.ListKVSecretVersions(key)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
+		_ = json.NewEncoder(w).Encode(versions)
+	}))))
+
+	// SSH key management
+	mux.Handle("/secretr/ssh-key", userAuthMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			var req struct {
+				Name       string `json:"name"`
+				PrivateKey string `json:"private_key"`
+				PublicKey  string `json:"public_key"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			v.store.SSHKeys[req.Name] = SSHKey{Private: req.PrivateKey, Public: req.PublicKey}
+			if err := v.Save(); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case http.MethodGet:
+			name := r.URL.Query().Get("name")
+			if name == "" {
+				http.Error(w, "Name is required", http.StatusBadRequest)
+				return
+			}
+			res := v.store.SSHKeys[name]
+			_ = json.NewEncoder(w).Encode(res)
+		case http.MethodDelete:
+			name := r.URL.Query().Get("name")
+			delete(v.store.SSHKeys, name)
+			_ = v.Save()
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	}))))
+
+	// Certificate management
+	mux.Handle("/secretr/certificate", userAuthMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Name     string `json:"name"`
+			Duration int    `json:"duration"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := v.GenerateCertificate(req.Name, time.Duration(req.Duration)*time.Hour*24); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))))
+
+	// Dynamic secret verification
+	mux.Handle("/secretr/dynamic/verify", userAuthMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Name   string `json:"name"`
+			Secret string `json:"secret"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		ok, err := v.VerifyDynamicSecret(req.Name, req.Secret)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]bool{"valid": ok})
+	}))))
+
+	// Export/Import
+	mux.Handle("/secretr/export", userAuthMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		exp, err := ExportSecretr(v)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -263,19 +275,21 @@ func StartSecureHTTPServer(v *Secretr) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(exp))
-	})
+	}))))
 
-	mux.HandleFunc("/secretr/import", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
-			return
-		}
+	mux.Handle("/secretr/import", userAuthMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		if err := ImportSecretr(v, string(body)); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}))))
+
+	// Auth endpoint (for extensibility)
+	mux.HandleFunc("/secretr/auth", func(w http.ResponseWriter, r *http.Request) {
+		// In production, implement login and token issuance.
+		http.Error(w, "Not implemented. Use your API key as Bearer token.", http.StatusNotImplemented)
 	})
 
 	mux.HandleFunc("/secretr/group", func(w http.ResponseWriter, r *http.Request) {
@@ -319,58 +333,116 @@ func StartSecureHTTPServer(v *Secretr) {
 		}
 		_, _ = w.Write([]byte(secret))
 	})
+}
 
-	mux.HandleFunc("/secretr/ssh-key", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			var req struct {
-				Name       string `json:"name"`
-				PrivateKey string `json:"private_key"`
-				PublicKey  string `json:"public_key"`
+// --- User token management ---
+
+// Example: userTokens maps API tokens to usernames.
+// In production, load from secure config or DB.
+var userTokens = map[string]string{
+	"admin-token-123": "admin",
+	"user-token-abc":  "user",
+}
+
+// userAuthMiddleware authenticates using a Bearer token and sets user in context.
+func userAuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Bearer ") {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		token := strings.TrimPrefix(auth, "Bearer ")
+		user, ok := userTokens[token]
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		ctx := context.WithValue(r.Context(), "user", user)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// getUserFromRequest extracts the user from context.
+func getUserFromRequest(r *http.Request) string {
+	user, _ := r.Context().Value("user").(string)
+	return user
+}
+
+// --- Enhanced secretr HTTP handler with JSON responses and access control ---
+
+func robustSecretrHTTPHandler(v *Secretr, w http.ResponseWriter, r *http.Request) {
+	user := getUserFromRequest(r)
+	key := strings.TrimPrefix(r.URL.Path, "/secretr/")
+	switch {
+	case strings.HasPrefix(key, "dynamic/"):
+		name := strings.TrimPrefix(key, "dynamic/")
+		leaseStr := r.URL.Query().Get("lease")
+		lease, err := time.ParseDuration(leaseStr + "s")
+		if err != nil || lease <= 0 {
+			lease = time.Minute * 10
+		}
+		secret, err := v.GenerateDynamicSecret(name, lease)
+		if err != nil {
+			http.Error(w, "failed to generate dynamic secret: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"secret": secret})
+		LogAudit("dynamic", name, "generated dynamic secret", v.masterKey)
+		return
+	case key == "" || key == "keys":
+		keys := v.List()
+		_ = json.NewEncoder(w).Encode(keys)
+		LogAudit("list", "", "listed keys", v.masterKey)
+		return
+	default:
+		switch r.Method {
+		case http.MethodGet:
+			if !CheckAccess(user, key, "read") {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
 			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			val, err := v.Get(key)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"key": key, "value": val})
+			LogAudit("get", key, "retrieved", v.masterKey)
+		case http.MethodPost, http.MethodPut:
+			if !CheckAccess(user, key, "write") {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			body, _ := io.ReadAll(r.Body)
+			if err := v.Set(key, string(body)); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			v.store.SSHKeys[req.Name] = SSHKey{Private: req.PrivateKey, Public: req.PublicKey}
-			if err := v.Save(); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+			w.WriteHeader(http.StatusNoContent)
+			LogAudit("set", key, "updated", v.masterKey)
+		case http.MethodDelete:
+			if !CheckAccess(user, key, "delete") {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			if err := v.Delete(key); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
-		} else if r.Method == http.MethodGet {
-			name := r.URL.Query().Get("name")
-			if name == "" {
-				http.Error(w, "Name is required", http.StatusBadRequest)
-				return
-			}
-			res := v.store.SSHKeys[name]
-			_ = json.NewEncoder(w).Encode(res)
-		} else {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			LogAudit("delete", key, "deleted", v.masterKey)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
-	})
+	}
+}
 
-	mux.HandleFunc("/secretr/certificate", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		var req struct {
-			Name     string `json:"name"`
-			Duration int    `json:"duration"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := v.GenerateCertificate(req.Name, time.Duration(req.Duration)*time.Hour*24); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
+// StartSecureHTTPServer initializes and runs an HTTP/HTTPS server with graceful shutdown.
+func StartSecureHTTPServer(v *Secretr, addr string) {
+	mux := http.NewServeMux()
+	initTransitEndpoints(mux, v)
 
-	addr := os.Getenv("SECRETR_HTTP_ADDR")
 	if addr == "" {
 		addr = ":8080"
 	}
