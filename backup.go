@@ -30,6 +30,7 @@ func ExportSecretr(v *Secretr) (string, error) {
 }
 
 // getEncryptionKey retrieves the encryption key from environment variable SECRETR_KEY.
+// NIST SP 800-57: The backup encryption key must be 32 bytes (AES-256).
 func getEncryptionKey() ([]byte, error) {
 	keyStr := os.Getenv("SECRETR_KEY")
 	if keyStr == "" {
@@ -44,6 +45,7 @@ func getEncryptionKey() ([]byte, error) {
 }
 
 func encryptData(plaintext string, key []byte) (string, error) {
+	// NIST SP 800-57: Use AES-GCM for backup encryption.
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
@@ -61,6 +63,7 @@ func encryptData(plaintext string, key []byte) (string, error) {
 }
 
 func decryptData(ciphertextEnc string, key []byte) (string, error) {
+	// NIST SP 800-57: Use AES-GCM for backup decryption.
 	ciphertext, err := base64.StdEncoding.DecodeString(ciphertextEnc)
 	if err != nil {
 		return "", err
@@ -146,4 +149,46 @@ func ReplicateBackup(v *Secretr, regionDir string) error {
 	}
 	filename := filepath.Join(regionDir, fmt.Sprintf("backup_%d.enc", time.Now().Unix()))
 	return os.WriteFile(filename, []byte(encData), 0600)
+}
+
+// BackupAllKeys creates a backup of all managed keys (metadata + encrypted material).
+func BackupAllKeys() (string, error) {
+	globalKeyStore.mu.Lock()
+	defer globalKeyStore.mu.Unlock()
+	b, err := json.MarshalIndent(globalKeyStore.Keys, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// RestoreAllKeys restores all managed keys from a backup (overwrites current).
+func RestoreAllKeys(backup string) error {
+	globalKeyStore.mu.Lock()
+	defer globalKeyStore.mu.Unlock()
+	var keys map[string][]ManagedKey
+	if err := json.Unmarshal([]byte(backup), &keys); err != nil {
+		return err
+	}
+	globalKeyStore.Keys = keys
+	return nil
+}
+
+// ArchiveKeyVersion stores a specific key version in backup.
+func ArchiveKeyVersion(keyID string, version int) error {
+	globalKeyStore.mu.Lock()
+	defer globalKeyStore.mu.Unlock()
+	versions, ok := globalKeyStore.Keys[keyID]
+	if !ok {
+		return fmt.Errorf("key not found")
+	}
+	for i, k := range versions {
+		if k.Metadata.Version == version {
+			globalKeyStore.Backup[keyID] = append(globalKeyStore.Backup[keyID], k)
+			// Remove from active keys
+			globalKeyStore.Keys[keyID] = append(versions[:i], versions[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("version not found")
 }

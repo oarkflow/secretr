@@ -6,6 +6,7 @@ import (
 )
 
 // GenerateDBCredential simulates on-the-fly generation of database credentials.
+// NIST SP 800-57: These are ephemeral credentials, not cryptographic keys.
 func GenerateDBCredential(engine string) (map[string]string, error) {
 	// For demonstration we only support "postgres" and "mysql".
 	var userPrefix string
@@ -28,6 +29,7 @@ func GenerateDBCredential(engine string) (map[string]string, error) {
 }
 
 // GenerateCloudToken simulates generating a token for a cloud provider.
+// NIST SP 800-57: These are ephemeral tokens, not cryptographic keys.
 func GenerateCloudToken(provider string) (string, error) {
 	// Supports "aws", "azure" and "gcp".
 	var prefix string

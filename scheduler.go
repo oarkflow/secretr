@@ -6,6 +6,7 @@ import (
 )
 
 // leaseRevocation starts a background task to revoke expired dynamic secrets.
+// NIST SP 800-57: This is part of secret lifecycle management, not cryptographic key destruction.
 func (v *Secretr) leaseRevocation(interval time.Duration) {
 	go func() {
 		for {

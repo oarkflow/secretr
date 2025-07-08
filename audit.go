@@ -14,6 +14,7 @@ import (
 var auditMu sync.Mutex
 
 // LogAudit writes an audit log line with an HMAC signature to prevent tampering.
+// NIST SP 800-57: HMAC-SHA256 is used for integrity of audit logs, keyed with the master key.
 func LogAudit(operation, key, details string, masterKey []byte) {
 	auditMu.Lock()
 	defer auditMu.Unlock()

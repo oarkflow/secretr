@@ -52,6 +52,9 @@ func (aa *AppRoleAuth) Authenticate(credentials map[string]string) (string, erro
 	return aa.UserField, nil
 }
 
+// NIST SP 800-57: Authentication tokens and AppRole secrets are not cryptographic keys,
+// but are used to control access to key management operations.
+
 // Auth provider registry for managing authentication methods.
 var (
 	authRegistry   = make(map[string]Auth)

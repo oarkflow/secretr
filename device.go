@@ -10,6 +10,10 @@ import (
 	"strings"
 )
 
+// NIST SP 800-57: Device fingerprint is not a cryptographic key, but is used to bind
+// secrets to a specific device as an additional security control. It is not used for
+// encryption or key derivation.
+
 type DeviceInfo struct {
 	Fingerprint string            `json:"fingerprint"`
 	Platform    string            `json:"platform"`

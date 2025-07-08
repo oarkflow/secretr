@@ -182,8 +182,53 @@ func main() {
 	fmt.Println("OPENAI_KEY  =", openAIKey)
 	fmt.Println("DEEPSEEK_KEY =", deepSeekKey)
 
+	// --- Managed Key Lifecycle Example ---
+	fmt.Println("=== Managed Key Lifecycle Example ===")
+	keyID := "demo-key"
+	// Create AES-256 key for encryption
+	mk, err := v.CreateManagedKey(keyID, secretr.KeyTypeAES256, "encrypt")
+	if err != nil {
+		fmt.Println("CreateManagedKey error:", err)
+	} else {
+		fmt.Printf("Created key: %+v\n", mk.Metadata)
+	}
+	// Rotate key
+	mk2, err := v.RotateManagedKey(keyID)
+	if err != nil {
+		fmt.Println("RotateManagedKey error:", err)
+	} else {
+		fmt.Printf("Rotated key: %+v\n", mk2.Metadata)
+	}
+	// List keys
+	keys := v.ListManagedKeys()
+	fmt.Println("All managed keys:", keys)
+	// Archive key
+	if err := v.ArchiveManagedKey(keyID); err != nil {
+		fmt.Println("ArchiveManagedKey error:", err)
+	} else {
+		fmt.Println("Archived key:", keyID)
+	}
+	// Restore key
+	if err := v.RestoreManagedKey(keyID); err != nil {
+		fmt.Println("RestoreManagedKey error:", err)
+	} else {
+		fmt.Println("Restored key:", keyID)
+	}
+	// Enforce usage policy
+	if err := v.EnforceKeyUsage(keyID, "encrypt"); err != nil {
+		fmt.Println("EnforceKeyUsage error:", err)
+	} else {
+		fmt.Println("Key usage policy enforcement passed for encrypt")
+	}
+	// Destroy key and audit
+	if err := v.DestroyKeyAndAudit(keyID); err != nil {
+		fmt.Println("DestroyKeyAndAudit error:", err)
+	} else {
+		fmt.Println("Destroyed key and audited:", keyID)
+	}
+
 	// Execute the consolidated example to demonstrate all functions.
-	// exampleAllFunctions()
+	exampleAllFunctions()
 
 	fmt.Println("All examples executed successfully.")
 }
