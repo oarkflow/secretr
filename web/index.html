@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Secretr Vault</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" href="https://cdn.jsdelivr.net/gh/tailwindlabs/heroicons@v2.0.16/24/solid/lock-closed.svg">
+</head>
+
+<body class="bg-gray-100 min-h-screen flex flex-col">
+    <header class="bg-indigo-700 text-white shadow p-4 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+            <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path
+                    d="M12 17v.01M7 10V7a5 5 0 0110 0v3m-9 4h8a2 2 0 012 2v4a2 2 0 01-2 2H7a2 2 0 01-2-2v-4a2 2 0 012-2z" />
+            </svg>
+            <span class="font-bold text-xl">Secretr Vault</span>
+        </div>
+        <div>
+            <button id="logoutBtn" class="bg-indigo-500 hover:bg-indigo-600 px-3 py-1 rounded">Logout</button>
+        </div>
+    </header>
+    <main class="flex-1 flex flex-col items-center py-8">
+        <div class="w-full max-w-4xl bg-white rounded-lg shadow p-6">
+            <div class="flex flex-wrap gap-4 mb-6">
+                <button class="tab-btn px-4 py-2 rounded bg-indigo-100 text-indigo-700 font-semibold"
+                    data-tab="secrets">Secrets</button>
+                <button class="tab-btn px-4 py-2 rounded bg-indigo-100 text-indigo-700 font-semibold"
+                    data-tab="tenants">Tenants</button>
+                <button class="tab-btn px-4 py-2 rounded bg-indigo-100 text-indigo-700 font-semibold"
+                    data-tab="keys">Keys</button>
+                <button class="tab-btn px-4 py-2 rounded bg-indigo-100 text-indigo-700 font-semibold"
+                    data-tab="settings">Settings</button>
+            </div>
+            <!-- Secrets Tab -->
+            <section id="tab-secrets" class="tab-content">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold">Secrets</h2>
+                    <button id="refreshSecrets"
+                        class="bg-indigo-500 text-white px-3 py-1 rounded hover:bg-indigo-600">Refresh</button>
+                </div>
+                <form id="addSecretForm" class="flex gap-2 mb-4">
+                    <input type="text" id="secretKey" placeholder="Key" class="border rounded px-2 py-1 flex-1"
+                        required>
+                    <input type="text" id="secretValue" placeholder="Value" class="border rounded px-2 py-1 flex-1"
+                        required>
+                    <button class="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600">Add</button>
+                </form>
+                <div id="secretsList" class="overflow-x-auto"></div>
+            </section>
+            <!-- Tenants Tab -->
+            <section id="tab-tenants" class="tab-content hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold">Tenants</h2>
+                    <button id="refreshTenants"
+                        class="bg-indigo-500 text-white px-3 py-1 rounded hover:bg-indigo-600">Refresh</button>
+                </div>
+                <form id="addTenantForm" class="flex gap-2 mb-4">
+                    <input type="text" id="tenantName" placeholder="Tenant Name" class="border rounded px-2 py-1 flex-1"
+                        required>
+                    <button class="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600">Add Tenant</button>
+                </form>
+                <div id="tenantsList" class="overflow-x-auto"></div>
+            </section>
+            <!-- Keys Tab -->
+            <section id="tab-keys" class="tab-content hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold">Managed Keys</h2>
+                    <button id="refreshKeys"
+                        class="bg-indigo-500 text-white px-3 py-1 rounded hover:bg-indigo-600">Refresh</button>
+                    <button id="createKeyBtn"
+                        class="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600 ml-2">Create Key</button>
+                </div>
+                <form id="createKeyForm" class="flex gap-2 mb-4 hidden">
+                    <input type="text" id="keyId" placeholder="Key ID" class="border rounded px-2 py-1 flex-1" required>
+                    <select id="keyType" class="border rounded px-2 py-1 flex-1">
+                        <option value="AES-256">AES-256</option>
+                        <option value="AES-128">AES-128</option>
+                        <option value="3DES">3DES</option>
+                        <option value="RSA-2048">RSA-2048</option>
+                        <option value="RSA-3072">RSA-3072</option>
+                        <option value="RSA-4096">RSA-4096</option>
+                        <option value="ECC-P256">ECC-P256</option>
+                        <option value="ECC-P384">ECC-P384</option>
+                        <option value="ECC-P521">ECC-P521</option>
+                    </select>
+                    <input type="text" id="keyUsage" placeholder="Usage (encrypt, sign, all)"
+                        class="border rounded px-2 py-1 flex-1" required>
+                    <button class="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600">Create</button>
+                </form>
+                <div id="keysList" class="overflow-x-auto"></div>
+            </section>
+            <!-- Settings Tab -->
+            <section id="tab-settings" class="tab-content hidden">
+                <h2 class="text-lg font-bold mb-4">Settings</h2>
+                <div>
+                    <label class="block mb-2 font-semibold">API Token:</label>
+                    <input type="password" id="apiToken" class="border rounded px-2 py-1 w-full"
+                        placeholder="Bearer Token">
+                    <button id="saveToken"
+                        class="mt-2 bg-indigo-500 text-white px-3 py-1 rounded hover:bg-indigo-600">Save</button>
+                </div>
+            </section>
+            <div id="notification"
+                class="fixed bottom-4 right-4 bg-green-500 text-white px-4 py-2 rounded shadow hidden"></div>
+        </div>
+    </main>
+    <footer class="text-center text-gray-500 py-4 text-sm">
+        &copy; <span id="year"></span> Secretr Vault. All rights reserved.
+    </footer>
+    <script>
+        // --- UI Tab Logic ---
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('bg-indigo-500', 'text-white'));
+                document.getElementById('tab-' + btn.dataset.tab).classList.remove('hidden');
+                btn.classList.add('bg-indigo-500', 'text-white');
+            });
+        });
+
+        // --- Notification ---
+        function notify(msg, color = "green") {
+            const n = document.getElementById('notification');
+            n.textContent = msg;
+            n.className = `fixed bottom-4 right-4 bg-${color}-500 text-white px-4 py-2 rounded shadow`;
+            n.classList.remove('hidden');
+            setTimeout(() => n.classList.add('hidden'), 2500);
+        }
+
+        // --- API Token Storage ---
+        function getToken() {
+            return localStorage.getItem('secretr_token') || '';
+        }
+        function setToken(token) {
+            localStorage.setItem('secretr_token', token);
+        }
+        document.getElementById('saveToken').onclick = function (e) {
+            e.preventDefault();
+            setToken(document.getElementById('apiToken').value);
+            notify('Token saved');
+        };
+        document.getElementById('logoutBtn').onclick = function () {
+            setToken('');
+            location.reload();
+        };
+
+        // --- Secrets Tab Logic ---
+        async function fetchSecrets() {
+            const res = await fetch('/secretr/list', { headers: { Authorization: 'Bearer ' + getToken() } });
+            if (!res.ok) return notify('Failed to fetch secrets', 'red');
+            const keys = await res.json();
+            let html = `<table class="min-w-full text-sm"><thead><tr><th class="text-left">Key</th><th class="text-left">Value</th><th>Actions</th></tr></thead><tbody>`;
+            for (const key of keys) {
+                html += `<tr>
+          <td class="font-mono">${key}</td>
+          <td><button onclick="showSecret('${key}')" class="text-indigo-600 underline">Show</button></td>
+          <td>
+            <button onclick="deleteSecret('${key}')" class="text-red-500 hover:underline">Delete</button>
+            <button onclick="showVersions('${key}')" class="text-gray-500 hover:underline ml-2">Versions</button>
+          </td>
+        </tr>`;
+            }
+            html += `</tbody></table>`;
+            document.getElementById('secretsList').innerHTML = html;
+        }
+        async function showSecret(key) {
+            const res = await fetch('/secretr/' + encodeURIComponent(key), { headers: { Authorization: 'Bearer ' + getToken() } });
+            if (!res.ok) return notify('Failed to fetch secret', 'red');
+            const data = await res.json();
+            prompt('Secret value for ' + key, data.value);
+        }
+        async function deleteSecret(key) {
+            if (!confirm('Delete secret ' + key + '?')) return;
+            const res = await fetch('/secretr/' + encodeURIComponent(key), { method: 'DELETE', headers: { Authorization: 'Bearer ' + getToken() } });
+            if (res.ok) {
+                notify('Secret deleted');
+                fetchSecrets();
+            } else {
+                notify('Delete failed', 'red');
+            }
+        }
+        async function showVersions(key) {
+            const res = await fetch('/secretr/kv/versions?key=' + encodeURIComponent(key), { headers: { Authorization: 'Bearer ' + getToken() } });
+            if (!res.ok) return notify('Failed to fetch versions', 'red');
+            const versions = await res.json();
+            let msg = '';
+            for (let i = 0; i < versions.length; ++i) {
+                msg += `Version ${i}: ${JSON.stringify(versions[i])}\n`;
+            }
+            alert(msg || 'No versions found');
+        }
+        document.getElementById('addSecretForm').onsubmit = async function (e) {
+            e.preventDefault();
+            const key = document.getElementById('secretKey').value;
+            const value = document.getElementById('secretValue').value;
+            const res = await fetch('/secretr/' + encodeURIComponent(key), {
+                method: 'POST',
+                headers: { Authorization: 'Bearer ' + getToken() },
+                body: value
+            });
+            if (res.ok) {
+                notify('Secret added');
+                fetchSecrets();
+                this.reset();
+            } else {
+                notify('Add failed', 'red');
+            }
+        };
+        document.getElementById('refreshSecrets').onclick = fetchSecrets;
+        fetchSecrets();
+
+        // --- Tenants Tab Logic ---
+        async function fetchTenants() {
+            const res = await fetch('/secretr/tenant/list', { headers: { Authorization: 'Bearer ' + getToken() } });
+            if (!res.ok) return notify('Failed to fetch tenants', 'red');
+            const tenants = (await res.json()) || [];
+            let html = `<table class="min-w-full text-sm"><thead><tr><th>Name</th><th>Admin Key</th><th>Secrets</th></tr></thead><tbody>`;
+            for (const name of tenants) {
+                html += `<tr>
+          <td>${name}</td>
+          <td><button onclick="getTenantKey('${name}')" class="text-indigo-600 underline">Show</button></td>
+          <td><button onclick="showTenantSecrets('${name}')" class="text-indigo-600 underline">Show</button></td>
+        </tr>`;
+            }
+            html += `</tbody></table>`;
+            document.getElementById('tenantsList').innerHTML = html;
+        }
+        async function getTenantKey(name) {
+            const res = await fetch('/secretr/tenant/getkey?name=' + encodeURIComponent(name), { headers: { Authorization: 'Bearer ' + getToken() } });
+            if (!res.ok) return notify('Failed to fetch admin key', 'red');
+            const data = await res.json();
+            prompt('Admin Key (base64) for ' + name, data.key);
+        }
+        async function showTenantSecrets(name) {
+            // For demo, fetch a known secret key (could be extended to list all)
+            const key = prompt('Enter secret key for tenant "' + name + '" to fetch:');
+            if (!key) return;
+            const res = await fetch(`/secretr/tenant/secret/get?name=${encodeURIComponent(name)}&key=${encodeURIComponent(key)}`, {
+                headers: { Authorization: 'Bearer ' + getToken() }
+            });
+            if (!res.ok) return notify('Failed to fetch tenant secret', 'red');
+            const data = await res.json();
+            prompt(`Secret for ${name}:${key}`, data.value);
+        }
+        document.getElementById('addTenantForm').onsubmit = async function (e) {
+            e.preventDefault();
+            const name = document.getElementById('tenantName').value;
+            const res = await fetch('/secretr/tenant/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
+                body: JSON.stringify({ name })
+            });
+            if (res.ok) {
+                notify('Tenant added');
+                fetchTenants();
+                this.reset();
+            } else {
+                notify('Add failed', 'red');
+            }
+        };
+        document.getElementById('refreshTenants').onclick = fetchTenants;
+        fetchTenants();
+
+        // --- Keys Tab Logic ---
+        async function fetchKeys() {
+            // Use /secretr/keys endpoint for managed keys metadata
+            const res = await fetch('/secretr/', { headers: { Authorization: 'Bearer ' + getToken() } });
+            if (!res.ok) return notify('Failed to fetch keys', 'red');
+            // Try to get managed keys metadata
+            const keysMetaRes = await fetch('/secretr/keys', { headers: { Authorization: 'Bearer ' + getToken() } });
+            let keys = [];
+            if (keysMetaRes.ok) {
+                keys = (await keysMetaRes.json()) || [];
+            }
+            let html = `<table class="min-w-full text-sm"><thead><tr><th>ID</th><th>Type</th><th>Usage</th><th>Version</th><th>Created</th><th>Actions</th></tr></thead><tbody>`;
+            for (const k of keys) {
+                html += `<tr>
+          <td>${k.id || k.ID}</td>
+          <td>${k.type || k.Type}</td>
+          <td>${k.usage || k.Usage}</td>
+          <td>${k.version || k.Version}</td>
+          <td>${k.created_at || k.CreatedAt}</td>
+          <td>
+            <button onclick="rotateKey('${k.id || k.ID}')" class="text-blue-600 hover:underline">Rotate</button>
+            <button onclick="archiveKey('${k.id || k.ID}')" class="text-yellow-600 hover:underline ml-2">Archive</button>
+            <button onclick="destroyKey('${k.id || k.ID}')" class="text-red-600 hover:underline ml-2">Destroy</button>
+          </td>
+        </tr>`;
+            }
+            html += `</tbody></table>`;
+            document.getElementById('keysList').innerHTML = html;
+        }
+        document.getElementById('refreshKeys').onclick = fetchKeys;
+
+        // Show/hide create key form
+        document.getElementById('createKeyBtn').onclick = function () {
+            const form = document.getElementById('createKeyForm');
+            form.classList.toggle('hidden');
+        };
+
+        // Create managed key
+        document.getElementById('createKeyForm').onsubmit = async function (e) {
+            e.preventDefault();
+            const id = document.getElementById('keyId').value;
+            const type = document.getElementById('keyType').value;
+            const usage = document.getElementById('keyUsage').value;
+            const res = await fetch('/secretr/keys', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
+                body: JSON.stringify({ id, type, usage })
+            });
+            if (res.ok) {
+                notify('Key created');
+                fetchKeys();
+                this.reset();
+                this.classList.add('hidden');
+            } else {
+                notify('Create failed', 'red');
+            }
+        };
+
+        // Key actions
+        async function rotateKey(id) {
+            const res = await fetch('/secretr/keys/rotate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
+                body: JSON.stringify({ id })
+            });
+            if (res.ok) {
+                notify('Key rotated');
+                fetchKeys();
+            } else {
+                notify('Rotate failed', 'red');
+            }
+        }
+        async function archiveKey(id) {
+            const res = await fetch('/secretr/keys/archive', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
+                body: JSON.stringify({ id })
+            });
+            if (res.ok) {
+                notify('Key archived');
+                fetchKeys();
+            } else {
+                notify('Archive failed', 'red');
+            }
+        }
+        async function destroyKey(id) {
+            if (!confirm('Destroy key ' + id + '?')) return;
+            const res = await fetch('/secretr/keys/destroy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
+                body: JSON.stringify({ id })
+            });
+            if (res.ok) {
+                notify('Key destroyed');
+                fetchKeys();
+            } else {
+                notify('Destroy failed', 'red');
+            }
+        }
+
+        fetchKeys();
+
+        // --- Settings Tab ---
+        document.getElementById('year').textContent = new Date().getFullYear();
+        document.getElementById('apiToken').value = getToken();
+    </script>
+</body>
+
+</html>

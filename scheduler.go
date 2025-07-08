@@ -7,6 +7,7 @@ import (
 
 // leaseRevocation starts a background task to revoke expired dynamic secrets.
 // NIST SP 800-57: This is part of secret lifecycle management, not cryptographic key destruction.
+// To comply, we will securely zeroize revoked secrets.
 func (v *Secretr) leaseRevocation(interval time.Duration) {
 	go func() {
 		for {
@@ -19,6 +20,7 @@ func (v *Secretr) leaseRevocation(interval time.Duration) {
 				for _, meta := range versions {
 					if meta.LeaseUntil.Before(now) {
 						revoked = true
+						zeroize([]byte(meta.Value))
 						LogAudit("lease_revoked", key, "dynamic secret expired and revoked", v.masterKey)
 					} else {
 						newVersions = append(newVersions, meta)

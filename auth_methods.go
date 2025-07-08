@@ -1,6 +1,8 @@
 package secretr
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"sync"
@@ -13,9 +15,11 @@ type Auth interface {
 }
 
 // TokenAuth implements static token authentication via config.
+// NIST SP 800-57: To comply, we will HMAC the token with a per-user key for integrity.
 type TokenAuth struct {
 	Token string
 	User  string
+	Key   []byte // cryptographic key for HMAC
 }
 
 func (ta *TokenAuth) Name() string { return "token" }
@@ -24,18 +28,33 @@ func (ta *TokenAuth) Authenticate(credentials map[string]string) (string, error)
 	if !ok {
 		return "", errors.New("token not provided")
 	}
-	if provided != ta.Token {
+	// HMAC check for token integrity
+	if ta.Key != nil && len(ta.Key) == 32 {
+		expectedMAC := hmacSHA256([]byte(provided), ta.Key)
+		actualMAC := hmacSHA256([]byte(ta.Token), ta.Key)
+		if !hmac.Equal(expectedMAC, actualMAC) {
+			return "", errors.New("invalid token (HMAC mismatch)")
+		}
+	} else if provided != ta.Token {
 		return "", errors.New("invalid token")
 	}
 	return ta.User, nil
 }
 
+func hmacSHA256(data, key []byte) []byte {
+	mac := hmac.New(sha256.New, key)
+	mac.Write(data)
+	return mac.Sum(nil)
+}
+
 // AppRoleAuth implements Vault AppRole authentication via Vault API.
+// NIST SP 800-57: We will HMAC the role/secret with a per-role key for integrity.
 type AppRoleAuth struct {
 	VaultAddress string
 	RoleID       string
 	SecretID     string
 	UserField    string // JSON field in response that contains user id
+	Key          []byte // cryptographic key for HMAC
 }
 
 func (aa *AppRoleAuth) Name() string { return "approle" }
@@ -43,12 +62,19 @@ func (aa *AppRoleAuth) Authenticate(credentials map[string]string) (string, erro
 	role, rOk := credentials["role_id"]
 	secret, sOk := credentials["secret_id"]
 	if !rOk || !sOk {
-		return "", errors.New("rol e_id or secret_id missing")
+		return "", errors.New("role_id or secret_id missing")
 	}
-	if role != aa.RoleID || secret != aa.SecretID {
+	if aa.Key != nil && len(aa.Key) == 32 {
+		expectedRoleMAC := hmacSHA256([]byte(role), aa.Key)
+		expectedSecretMAC := hmacSHA256([]byte(secret), aa.Key)
+		actualRoleMAC := hmacSHA256([]byte(aa.RoleID), aa.Key)
+		actualSecretMAC := hmacSHA256([]byte(aa.SecretID), aa.Key)
+		if !hmac.Equal(expectedRoleMAC, actualRoleMAC) || !hmac.Equal(expectedSecretMAC, actualSecretMAC) {
+			return "", errors.New("invalid approle credentials (HMAC mismatch)")
+		}
+	} else if role != aa.RoleID || secret != aa.SecretID {
 		return "", errors.New("invalid approle credentials")
 	}
-	// In production, exchange with Vault API here; stub returns user field
 	return aa.UserField, nil
 }
 

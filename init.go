@@ -186,3 +186,8 @@ func GenerateCertificate(key string, dur time.Duration) error {
 	}
 	return defaultSecretr.GenerateCertificate(key, dur)
 }
+
+// LoadUserDB loads the user database from a CSV file (username,token).
+func LoadUserDB(path string) error {
+	return loadUserDB(path)
+}

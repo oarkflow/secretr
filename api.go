@@ -3,6 +3,8 @@ package secretr
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,7 +25,79 @@ var (
 	rateLimit = 10
 	limiter   = make(map[string]int)
 	limMu     sync.Mutex
+
+	userTokens = map[string]string{} // token -> username
+	userDBMu   sync.RWMutex
 )
+
+// Load users from CSV file: username,token
+func loadUserDB(path string) error {
+	userDBMu.Lock()
+	defer userDBMu.Unlock()
+
+	userTokens = make(map[string]string) // Initialize the map
+
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("failed to open file %s: %w", path, err)
+	}
+	defer f.Close()
+
+	reader := csv.NewReader(f)
+
+	// Read the header row
+	header, err := reader.Read()
+	if err != nil {
+		if err == io.EOF {
+			return fmt.Errorf("CSV file %s is empty", path)
+		}
+		return fmt.Errorf("failed to read CSV header from %s: %w", path, err)
+	}
+
+	// Find the indices of "username" and "token"
+	usernameIndex := -1
+	tokenIndex := -1
+	for i, col := range header {
+		trimmedCol := strings.TrimSpace(col)
+		if trimmedCol == "username" {
+			usernameIndex = i
+		} else if trimmedCol == "token" {
+			tokenIndex = i
+		}
+	}
+
+	if usernameIndex == -1 || tokenIndex == -1 {
+		return fmt.Errorf("CSV header in %s must contain 'username' and 'token' columns", path)
+	}
+
+	// Read the remaining rows
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break // End of file
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read CSV record from %s: %w", path, err)
+		}
+
+		// Ensure the record has enough columns before accessing
+		if len(record) > usernameIndex && len(record) > tokenIndex {
+			username := strings.TrimSpace(record[usernameIndex])
+			token := strings.TrimSpace(record[tokenIndex])
+
+			if username != "" && token != "" {
+				userTokens[token] = username
+			}
+		} else {
+			// Optionally log or handle malformed rows more specifically
+			fmt.Printf("Warning: Skipping malformed row in %s: %v\n", path, record)
+		}
+	}
+
+	fmt.Printf("Successfully loaded user data from %s. Total entries: %d\n", path, len(userTokens))
+	// fmt.Println(userTokens) // Uncomment for debugging to see the map content
+	return nil
+}
 
 // authMiddleware validates the Bearer token provided in the Authorization header.
 func authMiddleware(next http.Handler) http.Handler {
@@ -179,17 +253,6 @@ func initTransitEndpoints(mux *http.ServeMux, v *Secretr) {
 		_ = json.NewEncoder(w).Encode(keys)
 	}))))
 
-	// KV secret versioning
-	mux.Handle("/secretr/kv/versions", userAuthMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := r.URL.Query().Get("key")
-		versions, err := v.ListKVSecretVersions(key)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(versions)
-	}))))
-
 	// SSH key management
 	mux.Handle("/secretr/ssh-key", userAuthMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -335,15 +398,6 @@ func initTransitEndpoints(mux *http.ServeMux, v *Secretr) {
 	})
 }
 
-// --- User token management ---
-
-// Example: userTokens maps API tokens to usernames.
-// In production, load from secure config or DB.
-var userTokens = map[string]string{
-	"admin-token-123": "admin",
-	"user-token-abc":  "user",
-}
-
 // userAuthMiddleware authenticates using a Bearer token and sets user in context.
 func userAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -353,7 +407,9 @@ func userAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		token := strings.TrimPrefix(auth, "Bearer ")
+		userDBMu.RLock()
 		user, ok := userTokens[token]
+		userDBMu.RUnlock()
 		if !ok {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -438,10 +494,231 @@ func robustSecretrHTTPHandler(v *Secretr, w http.ResponseWriter, r *http.Request
 	}
 }
 
-// StartSecureHTTPServer initializes and runs an HTTP/HTTPS server with graceful shutdown.
+// --- Tenant management ---
+
+func initTenantEndpoints(mux *http.ServeMux) {
+	// Add tenant
+	mux.HandleFunc("/secretr/tenant/add", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct{ Name string }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		tenant, err := AddTenant(req.Name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"name":     tenant.Name,
+			"adminKey": base64.StdEncoding.EncodeToString(tenant.AdminKey),
+		})
+	})
+
+	// List tenants
+	mux.HandleFunc("/secretr/tenant/list", func(w http.ResponseWriter, r *http.Request) {
+		names := ListTenants()
+		_ = json.NewEncoder(w).Encode(names)
+	})
+
+	// Set tenant admin key
+	mux.HandleFunc("/secretr/tenant/setkey", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Name string `json:"name"`
+			Key  string `json:"key"` // base64
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" || req.Key == "" {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		key, err := base64.StdEncoding.DecodeString(req.Key)
+		if err != nil {
+			http.Error(w, "invalid key", http.StatusBadRequest)
+			return
+		}
+		if err := SetTenantAdminKey(req.Name, key); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	// Get tenant admin key
+	mux.HandleFunc("/secretr/tenant/getkey", func(w http.ResponseWriter, r *http.Request) {
+		name := r.URL.Query().Get("name")
+		if name == "" {
+			http.Error(w, "name required", http.StatusBadRequest)
+			return
+		}
+		key, err := GetTenantAdminKey(name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"key": base64.StdEncoding.EncodeToString(key)})
+	})
+
+	// Set tenant secret
+	mux.HandleFunc("/secretr/tenant/secret/set", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Name  string `json:"name"`
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" || req.Key == "" {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		if err := SetTenantSecret(req.Name, req.Key, req.Value); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	// Get tenant secret
+	mux.HandleFunc("/secretr/tenant/secret/get", func(w http.ResponseWriter, r *http.Request) {
+		name := r.URL.Query().Get("name")
+		key := r.URL.Query().Get("key")
+		if name == "" || key == "" {
+			http.Error(w, "name and key required", http.StatusBadRequest)
+			return
+		}
+		val, err := GetTenantSecret(name, key)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"value": val})
+	})
+}
+
+// --- Managed Keys API Endpoints ---
+
+func initManagedKeysEndpoints(mux *http.ServeMux, v *Secretr) {
+	// List managed keys metadata
+	mux.Handle("/secretr/keys", userAuthMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			keys := v.ListManagedKeys()
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(keys)
+			return
+		}
+		if r.Method == http.MethodPost {
+			var req struct {
+				ID    string `json:"id"`
+				Type  string `json:"type"`
+				Usage string `json:"usage"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "invalid request", http.StatusBadRequest)
+				return
+			}
+			mk, err := v.CreateManagedKey(req.ID, KeyType(req.Type), req.Usage)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(mk.Metadata)
+			return
+		}
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}))))
+
+	// Rotate key
+	mux.Handle("/secretr/keys/rotate", userAuthMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ ID string }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		mk, err := v.RotateManagedKey(req.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(mk.Metadata)
+	}))))
+	// Archive key
+	mux.Handle("/secretr/keys/archive", userAuthMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ ID string }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		if err := v.ArchiveManagedKey(req.ID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))))
+	// Destroy key
+	mux.Handle("/secretr/keys/destroy", userAuthMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ ID string }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		if err := v.DestroyKeyAndAudit(req.ID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))))
+}
+
+// --- KV Secret Versions Endpoint ---
+
+func initKVSecretVersionsEndpoint(mux *http.ServeMux, v *Secretr) {
+	mux.Handle("/secretr/kv/versions", userAuthMiddleware(rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.URL.Query().Get("key")
+		if key == "" {
+			http.Error(w, "key parameter required", http.StatusBadRequest)
+			return
+		}
+		versions, err := v.ListKVSecretVersions(key)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(versions)
+	}))))
+}
+
 func StartSecureHTTPServer(v *Secretr, addr string) {
 	mux := http.NewServeMux()
 	initTransitEndpoints(mux, v)
+	initTenantEndpoints(mux)
+	initManagedKeysEndpoints(mux, v)
+	initKVSecretVersionsEndpoint(mux, v)
+
+	// Serve the frontend HTML (and static assets if needed)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			http.ServeFile(w, r, "./web/index.html")
+			return
+		}
+		// Optionally serve static files (css/js) from ./web/
+		if strings.HasPrefix(r.URL.Path, "/web/") {
+			http.StripPrefix("/web/", http.FileServer(http.Dir("./web"))).ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
 
 	if addr == "" {
 		addr = ":8080"

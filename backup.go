@@ -31,13 +31,18 @@ func ExportSecretr(v *Secretr) (string, error) {
 
 // getEncryptionKey retrieves the encryption key from environment variable SECRETR_KEY.
 // NIST SP 800-57: The backup encryption key must be 32 bytes (AES-256).
+// If not set, generate a random key and print a warning.
 func getEncryptionKey() ([]byte, error) {
 	keyStr := os.Getenv("SECRETR_KEY")
 	if keyStr == "" {
-		return nil, fmt.Errorf("environment variable SECRETR_KEY is not set")
+		key, err := generateRandomBytes(32)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate backup key: %v", err)
+		}
+		fmt.Fprintln(os.Stderr, "WARNING: SECRETR_KEY not set, using random key for backup (not recoverable)")
+		return key, nil
 	}
 	key := []byte(keyStr)
-	fmt.Println(keyStr, len(key), len(keyStr))
 	if len(key) != 32 {
 		return nil, fmt.Errorf("encryption key must be 32 bytes")
 	}
