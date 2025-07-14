@@ -214,8 +214,3 @@ func DeleteFile(fileName string) error {
 	}
 	return defaultSecretr.DeleteFile(fileName)
 }
-
-// LoadUserDB loads the user database from a CSV file (username,token).
-func LoadUserDB(path string) error {
-	return loadUserDB(path)
-}

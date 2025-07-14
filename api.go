@@ -19,6 +19,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 )
 
 var (
@@ -29,6 +31,181 @@ var (
 	userTokens = map[string]string{} // token -> username
 	userDBMu   sync.RWMutex
 )
+
+// UserStore is an interface for user data backends.
+type UserStore interface {
+	Load() error
+	GetUserByToken(token string) (username string, ok bool)
+}
+
+// --- CSV UserStore Implementation ---
+type CSVUserStore struct {
+	Path  string
+	Users map[string]string // token -> username
+	mu    sync.RWMutex
+}
+
+func (c *CSVUserStore) Load() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Users = make(map[string]string)
+	f, err := os.Open(c.Path)
+	if err != nil {
+		return fmt.Errorf("failed to open file %s: %w", c.Path, err)
+	}
+	defer f.Close()
+	reader := csv.NewReader(f)
+	header, err := reader.Read()
+	if err != nil {
+		return fmt.Errorf("failed to read CSV header from %s: %w", c.Path, err)
+	}
+	usernameIndex, tokenIndex := -1, -1
+	for i, col := range header {
+		trimmedCol := strings.TrimSpace(col)
+		if trimmedCol == "username" {
+			usernameIndex = i
+		} else if trimmedCol == "token" {
+			tokenIndex = i
+		}
+	}
+	if usernameIndex == -1 || tokenIndex == -1 {
+		return fmt.Errorf("CSV header in %s must contain 'username' and 'token' columns", c.Path)
+	}
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read CSV record from %s: %w", c.Path, err)
+		}
+		if len(record) > usernameIndex && len(record) > tokenIndex {
+			username := strings.TrimSpace(record[usernameIndex])
+			token := strings.TrimSpace(record[tokenIndex])
+			if username != "" && token != "" {
+				c.Users[token] = username
+			}
+		}
+	}
+	return nil
+}
+func (c *CSVUserStore) GetUserByToken(token string) (string, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	username, ok := c.Users[token]
+	return username, ok
+}
+
+// --- JSON UserStore Implementation ---
+type JSONUserStore struct {
+	Path  string
+	Users map[string]string // token -> username
+	mu    sync.RWMutex
+}
+
+func (j *JSONUserStore) Load() error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.Users = make(map[string]string)
+	f, err := os.Open(j.Path)
+	if err != nil {
+		return fmt.Errorf("failed to open file %s: %w", j.Path, err)
+	}
+	defer f.Close()
+	dec := json.NewDecoder(f)
+	var users []struct {
+		Username string `json:"username"`
+		Token    string `json:"token"`
+	}
+	if err := dec.Decode(&users); err != nil {
+		return fmt.Errorf("failed to decode JSON user file: %w", err)
+	}
+	for _, u := range users {
+		if u.Username != "" && u.Token != "" {
+			j.Users[u.Token] = u.Username
+		}
+	}
+	return nil
+}
+func (j *JSONUserStore) GetUserByToken(token string) (string, bool) {
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	username, ok := j.Users[token]
+	return username, ok
+}
+
+// --- SQLX UserStore Implementation ---
+type SQLXUserStore struct {
+	DSN   string
+	Table string
+	Users map[string]string // token -> username
+	mu    sync.RWMutex
+}
+
+func (s *SQLXUserStore) Load() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Users = make(map[string]string)
+	// Import _ "github.com/mattn/go-sqlite3" or other driver as needed.
+	db, err := sqlx.Open("sqlite3", s.DSN)
+	if err != nil {
+		return fmt.Errorf("failed to open db: %w", err)
+	}
+	defer db.Close()
+	type row struct {
+		Username string `db:"username"`
+		Token    string `db:"token"`
+	}
+	var rows []row
+	query := fmt.Sprintf("SELECT username, token FROM %s", s.Table)
+	if err := db.Select(&rows, query); err != nil {
+		return fmt.Errorf("failed to query users: %w", err)
+	}
+	for _, r := range rows {
+		if r.Username != "" && r.Token != "" {
+			s.Users[r.Token] = r.Username
+		}
+	}
+	return nil
+}
+func (s *SQLXUserStore) GetUserByToken(token string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	username, ok := s.Users[token]
+	return username, ok
+}
+
+// --- UserStore Factory and Global ---
+var (
+	userStore UserStore = &CSVUserStore{Path: "users.csv"}
+)
+
+// SetUserStore allows switching user backend at runtime.
+func SetUserStore(store UserStore) {
+	userStore = store
+}
+
+// LoadUserDB loads users from the configured backend.
+func LoadUserDB(path string) error {
+	switch {
+	case strings.HasSuffix(path, ".csv"):
+		userStore = &CSVUserStore{Path: path}
+	case strings.HasSuffix(path, ".json"):
+		userStore = &JSONUserStore{Path: path}
+	case strings.HasPrefix(path, "sqlite://"):
+		// Example: sqlite:///path/to/db.sqlite3?table=users
+		parts := strings.SplitN(strings.TrimPrefix(path, "sqlite://"), "?", 2)
+		dsn := parts[0]
+		table := "users"
+		if len(parts) == 2 && strings.HasPrefix(parts[1], "table=") {
+			table = strings.TrimPrefix(parts[1], "table=")
+		}
+		userStore = &SQLXUserStore{DSN: dsn, Table: table}
+	default:
+		userStore = &CSVUserStore{Path: path}
+	}
+	return userStore.Load()
+}
 
 // Load users from CSV file: username,token
 func loadUserDB(path string) error {

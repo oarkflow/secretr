@@ -166,7 +166,7 @@ func exampleAllFunctions() {
 }
 
 func main() {
-	os.Setenv("SECRETR_MASTERKEY", "admintest")
+	os.Setenv("SECRETR_MASTERKEY", "test1234")
 	os.Setenv("SECRETR_KEY", secretr.GenerateRandomString())
 
 	// Store a file
@@ -181,16 +181,13 @@ func main() {
 	}
 	// Use content and metadata
 	fmt.Printf("File: %s, Size: %d, Created: %v\n",
-		metadata.FileName, metadata.Size, metadata.CreatedAt)
+		metadata.FileName, metadata.Size, metadata.CreatedAt.Format(time.DateTime))
 
 	// List all files
 	files := secretr.ListFiles()
 	for _, f := range files {
 		fmt.Printf("File: %s, Tags: %v\n", f.FileName, f.Tags)
 	}
-
-	// Delete a file
-	err = secretr.DeleteFile("file.txt")
 	return
 	v := secretr.New()
 	v.SetDistributeKey(false)

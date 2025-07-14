@@ -183,11 +183,38 @@ type Secretr struct {
 	nonceSize     int
 	promptFunc    func() error
 	distributeKey bool
+	processing    bool // Flag to indicate if operations are in progress
 }
 
 // SetDistributeKey sets the distributeKey flag on the default secretr.
 func SetDistributeKey(value bool) {
 	defaultSecretr.distributeKey = value
+}
+
+// IsProcessing returns true if the secretr store is currently processing operations.
+func (v *Secretr) IsProcessing() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.processing
+}
+
+// LockStore marks the store as being processed, preventing other operations.
+// Returns false if the store is already locked.
+func (v *Secretr) LockStore() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.processing {
+		return false
+	}
+	v.processing = true
+	return true
+}
+
+// UnlockStore releases the processing lock on the store.
+func (v *Secretr) UnlockStore() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.processing = false
 }
 
 // New creates a new Secretr instance.
@@ -239,9 +266,18 @@ func (v *Secretr) distributeMasterKey(masterKey []byte) error {
 }
 
 func (v *Secretr) Sync() error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
 	if v.masterKey == nil {
 		return fmt.Errorf("master key not initialized")
 	}
+
+	// Mark as processing
+	v.processing = true
+	defer func() {
+		v.processing = false
+	}()
 
 	// Load existing data
 	if err := v.Load(); err != nil {
@@ -579,6 +615,12 @@ func (v *Secretr) StoreFile(filePath string, tags []string, properties map[strin
 		return err
 	}
 
+	// Set processing flag
+	v.processing = true
+	defer func() {
+		v.processing = false
+	}()
+
 	// Read file
 	content, err := os.ReadFile(filePath)
 	if err != nil {
@@ -644,6 +686,13 @@ func (v *Secretr) RetrieveFile(fileName string) ([]byte, FileMetadata, error) {
 	if err := v.PromptMaster(); err != nil {
 		return nil, FileMetadata{}, err
 	}
+
+	// Set processing flag
+	v.processing = true
+	defer func() {
+		v.processing = false
+	}()
+
 	if err := v.Load(); err != nil {
 		return nil, FileMetadata{}, fmt.Errorf("failed to load vault: %v", err)
 	}
@@ -685,6 +734,12 @@ func (v *Secretr) DeleteFile(fileName string) error {
 	if err := v.PromptMaster(); err != nil {
 		return err
 	}
+
+	// Set processing flag
+	v.processing = true
+	defer func() {
+		v.processing = false
+	}()
 
 	if _, exists := v.store.Files[fileName]; !exists {
 		return fmt.Errorf("file not found: %s", fileName)
@@ -829,6 +884,13 @@ func (v *Secretr) Set(key string, value any) error {
 	if err := v.PromptMaster(); err != nil {
 		return err
 	}
+
+	// Set processing flag
+	v.processing = true
+	defer func() {
+		v.processing = false
+	}()
+
 	if strings.Contains(key, ".") {
 		parts := strings.Split(key, ".")
 		base := parts[0]
@@ -949,6 +1011,13 @@ func (v *Secretr) Delete(key string) error {
 	if err := v.PromptMaster(); err != nil {
 		return err
 	}
+
+	// Set processing flag
+	v.processing = true
+	defer func() {
+		v.processing = false
+	}()
+
 	if strings.Contains(key, ".") {
 		parts := strings.Split(key, ".")
 		base := parts[0]
