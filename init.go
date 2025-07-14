@@ -187,6 +187,34 @@ func GenerateCertificate(key string, dur time.Duration) error {
 	return defaultSecretr.GenerateCertificate(key, dur)
 }
 
+func StoreFile(filePath string, tags []string, metadata map[string]string) error {
+	if defaultSecretr == nil {
+		return fmt.Errorf("secretr not initialized")
+	}
+	return defaultSecretr.StoreFile(filePath, tags, metadata)
+}
+
+func RetrieveFile(fileName string) ([]byte, FileMetadata, error) {
+	if defaultSecretr == nil {
+		return nil, FileMetadata{}, fmt.Errorf("secretr not initialized")
+	}
+	return defaultSecretr.RetrieveFile(fileName)
+}
+
+func ListFiles() []FileMetadata {
+	if defaultSecretr == nil {
+		return nil
+	}
+	return defaultSecretr.ListFiles()
+}
+
+func DeleteFile(fileName string) error {
+	if defaultSecretr == nil {
+		return fmt.Errorf("secretr not initialized")
+	}
+	return defaultSecretr.DeleteFile(fileName)
+}
+
 // LoadUserDB loads the user database from a CSV file (username,token).
 func LoadUserDB(path string) error {
 	return loadUserDB(path)

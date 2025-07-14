@@ -704,6 +704,8 @@ func StartSecureHTTPServer(v *Secretr, addr string) {
 	initTenantEndpoints(mux)
 	initManagedKeysEndpoints(mux, v)
 	initKVSecretVersionsEndpoint(mux, v)
+	fileHandler := NewFileHandler(v)
+	fileHandler.RegisterFileRoutes(mux)
 
 	// Serve the frontend HTML (and static assets if needed)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

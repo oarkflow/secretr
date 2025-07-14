@@ -1,6 +1,6 @@
 # Secretr
 
-Secretr is a secure secret management tool implemented in Go. It provides encrypted storage, secure access, backup/restore features, and CLI/API interfaces to manage secrets.
+Secretr is a secure secret management tool implemented in Go. It provides encrypted storage, secure access, backup/restore features, CLI/API interfaces to manage secrets, and encrypted file storage with image rendering capabilities.
 
 ## Features
 
@@ -78,6 +78,22 @@ The secretr also exposes HTTP endpoints:
 - **Backup & Restore:**
   - POST `/secretr/backup` to create a backup file.
   - POST `/secretr/restore?path=<backup_path>` to restore the secretr from a backup file.
+
+### File API Endpoints
+
+Secretr provides encrypted file storage with dedicated HTTP endpoints:
+
+- **Upload File:**
+  - POST `/api/files` - Upload a file with metadata (multipart/form-data)
+  - Form fields: `file` (required), `tags` (comma-separated), `prop_*` (custom properties)
+- **List Files:**
+  - GET `/api/files` - Get a list of all stored files and their metadata
+- **Download File:**
+  - GET `/api/files/{filename}` - Download a specific file
+- **Render Image:**
+  - GET `/api/files/render/{filename}` - Render an image file directly in the browser (only works for image files)
+- **Delete File:**
+  - DELETE `/api/files/{filename}` - Delete a specific file
 
 ## Configuration
 
