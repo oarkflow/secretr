@@ -621,6 +621,16 @@ func (v *Secretr) StoreFile(filePath string, tags []string, properties map[strin
 		v.processing = false
 	}()
 
+	// Get the file name
+	fileName := filepath.Base(filePath)
+
+	// Check if file already exists
+	if v.store.Files != nil {
+		if _, exists := v.store.Files[fileName]; exists {
+			return fmt.Errorf("file already exists: %s", fileName)
+		}
+	}
+
 	// Read file
 	content, err := os.ReadFile(filePath)
 	if err != nil {

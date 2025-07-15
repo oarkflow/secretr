@@ -174,6 +174,10 @@ func main() {
 		[]string{"important", "confidential"},
 		map[string]string{"department": "finance"})
 
+	if err != nil {
+		panic(err)
+	}
+
 	// Retrieve a file
 	_, metadata, err := secretr.RetrieveFile("file.txt")
 	if err != nil {
