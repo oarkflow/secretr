@@ -908,6 +908,29 @@ func StartSecureHTTPServer(v *Secretr, addr string) {
 		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop() // Ensure the ticker is stopped when main exits
+
+	done := make(chan bool) // Channel to signal when to stop
+
+	go func() {
+		if v != nil {
+			for {
+				select {
+				case <-done:
+					fmt.Println("Stopping periodic task.")
+					return
+				case <-ticker.C:
+					if err := v.Load(); err != nil {
+						log.Fatalf("Failed to load Secretr: %v", err)
+					}
+				}
+			}
+		} else {
+			log.Println("No Secretr instance provided, running without secrets")
+		}
+	}()
+
 	go func() {
 		certFile := os.Getenv("SECRETR_HTTP_CERT")
 		keyFile := os.Getenv("SECRETR_HTTP_KEY")
@@ -928,6 +951,7 @@ func StartSecureHTTPServer(v *Secretr, addr string) {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+	done <- true
 	log.Println("Shutting down server...")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -105,7 +106,7 @@ func (h *FileHandler) handleFileList(w http.ResponseWriter, r *http.Request) {
 
 // handleFileOperations handles GET (download) and DELETE requests for specific files
 func (h *FileHandler) handleFileOperations(w http.ResponseWriter, r *http.Request) {
-	fileName := strings.TrimPrefix(r.URL.Path, "/api/files/")
+	fileName := strings.TrimPrefix(r.URL.Path, "/secretr/files/")
 	if fileName == "" {
 		http.Error(w, "File name required", http.StatusBadRequest)
 		return
@@ -150,7 +151,7 @@ func (h *FileHandler) handleFileDelete(w http.ResponseWriter, r *http.Request, f
 
 // handleFileRender handles image rendering requests
 func (h *FileHandler) handleFileRender(w http.ResponseWriter, r *http.Request) {
-	fileName := strings.TrimPrefix(r.URL.Path, "/api/files/render/")
+	fileName := strings.TrimPrefix(r.URL.Path, "/secretr/files/render/")
 	if fileName == "" {
 		http.Error(w, "File name required", http.StatusBadRequest)
 		return
@@ -161,7 +162,12 @@ func (h *FileHandler) handleFileRender(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "File not found", http.StatusNotFound)
 		return
 	}
-
+	ext := filepath.Ext(metadata.FileName)
+	if ext == ".svg" {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Write(content)
+		return
+	}
 	if !metadata.IsImage() {
 		http.Error(w, "File is not an image", http.StatusBadRequest)
 		return

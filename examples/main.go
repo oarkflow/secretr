@@ -166,7 +166,7 @@ func exampleAllFunctions() {
 }
 
 func main() {
-	os.Setenv("SECRETR_MASTERKEY", "test1234")
+	os.Setenv("SECRETR_MASTERKEY", "admintest")
 	os.Setenv("SECRETR_KEY", secretr.GenerateRandomString())
 
 	// Store a file

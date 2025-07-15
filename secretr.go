@@ -172,6 +172,11 @@ func NewPersist() Persist {
 	}
 }
 
+func (v Persist) ResetFiles() {
+	// Reset the Files map to an empty state
+	v.Files = make(map[string]StoredFile)
+}
+
 // Secretr represents the secret storage with encryption, reset and rate limiting.
 type Secretr struct {
 	store         Persist
@@ -606,6 +611,65 @@ func sendResetEmail(code string) {
 	}
 }
 
+func (v *Secretr) StoreFileContent(fileName string, size int64, content []byte, tags []string, properties map[string]string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if err := v.PromptMaster(); err != nil {
+		return err
+	}
+
+	// Set processing flag
+	v.processing = true
+	defer func() {
+		v.processing = false
+	}()
+
+	// Calculate checksum
+	hash := sha256.Sum256(content)
+	checkSum := base64.StdEncoding.EncodeToString(hash[:])
+
+	// Create metadata
+	metadata := FileMetadata{
+		FileName:    filepath.Base(fileName),
+		Size:        size,
+		ContentType: detectContentType(content, fileName),
+		CreatedAt:   time.Now(),
+		ModifiedAt:  time.Now(),
+		Tags:        tags,
+		Properties:  properties,
+		CheckSum:    checkSum,
+	}
+
+	// Encrypt file content
+	nonce := make([]byte, v.nonceSize)
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return fmt.Errorf("failed to generate nonce: %v", err)
+	}
+
+	encrypted := v.cipherGCM.Seal(nonce, nonce, content, nil)
+
+	// Store the file
+	storedFile := StoredFile{
+		Metadata:  metadata,
+		Encrypted: encrypted,
+	}
+
+	// Ensure Files map is initialized
+	if v.store.Files == nil {
+		v.store.Files = make(map[string]StoredFile)
+	}
+	v.store.Files[metadata.FileName] = storedFile
+
+	err := v.Save()
+	if err == nil {
+		LogAudit("store_file", metadata.FileName, "file stored", v.masterKey)
+	} else {
+		return fmt.Errorf("failed to save file to vault: %v", err)
+	}
+	return nil
+}
+
 // StoreFile encrypts and stores a file in the vault
 func (v *Secretr) StoreFile(filePath string, tags []string, properties map[string]string) error {
 	v.mu.Lock()
@@ -636,56 +700,11 @@ func (v *Secretr) StoreFile(filePath string, tags []string, properties map[strin
 	if err != nil {
 		return fmt.Errorf("failed to read file: %v", err)
 	}
-
-	// Calculate checksum
-	hash := sha256.Sum256(content)
-	checkSum := base64.StdEncoding.EncodeToString(hash[:])
-
-	// Get file info
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to get file info: %v", err)
 	}
-
-	// Create metadata
-	metadata := FileMetadata{
-		FileName:    filepath.Base(filePath),
-		Size:        fileInfo.Size(),
-		ContentType: detectContentType(content, filePath),
-		CreatedAt:   time.Now(),
-		ModifiedAt:  time.Now(),
-		Tags:        tags,
-		Properties:  properties,
-		CheckSum:    checkSum,
-	}
-
-	// Encrypt file content
-	nonce := make([]byte, v.nonceSize)
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return fmt.Errorf("failed to generate nonce: %v", err)
-	}
-
-	encrypted := v.cipherGCM.Seal(nonce, nonce, content, nil)
-
-	// Store the file
-	storedFile := StoredFile{
-		Metadata:  metadata,
-		Encrypted: encrypted,
-	}
-
-	// Ensure Files map is initialized
-	if v.store.Files == nil {
-		v.store.Files = make(map[string]StoredFile)
-	}
-	v.store.Files[metadata.FileName] = storedFile
-
-	err = v.Save()
-	if err == nil {
-		LogAudit("store_file", metadata.FileName, "file stored", v.masterKey)
-	} else {
-		return fmt.Errorf("failed to save file to vault: %v", err)
-	}
-	return nil
+	return v.StoreFileContent(fileName, fileInfo.Size(), content, tags, properties)
 }
 
 // RetrieveFile gets a file from the vault and decrypts it
@@ -766,9 +785,11 @@ func (v *Secretr) DeleteFile(fileName string) error {
 
 // Helper function to detect content type
 func detectContentType(content []byte, fileName string) string {
-	// Get extension, convert to lowercase for consistency
 	ext := strings.ToLower(filepath.Ext(fileName))
 	if ext != "" {
+		if ext == ".svg" {
+			return "image/svg+xml" // Special case for SVG files
+		}
 		// Use MIME package to get content type from extension
 		if mimeType := mime.TypeByExtension(ext); mimeType != "" {
 			return mimeType

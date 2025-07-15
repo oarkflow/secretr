@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -17,6 +18,8 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/oarkflow/clipboard"
+
+	"github.com/oarkflow/xid/wuid"
 
 	"github.com/oarkflow/secretr"
 )
@@ -156,6 +159,9 @@ func (g *GUI) showMain() {
 		widget.NewToolbarAction(theme.MailSendIcon(), g.signData),             // Sign Data
 		widget.NewToolbarAction(theme.MailReplyIcon(), g.verifySignature),     // Verify Signature
 		widget.NewToolbarAction(theme.DocumentIcon(), g.generateHash),         // Generate Hash
+		widget.NewToolbarSeparator(),
+		widget.NewToolbarAction(theme.FolderIcon(), g.showFileManager), // Add File Manager button
+
 	)
 	g.toolbar = toolbar // saved earlier
 	g.search = widget.NewEntry()
@@ -270,6 +276,171 @@ func (g *GUI) refreshKeys() {
 		g.fullKeyData = g.secretr.List()
 	}
 	g.filterKeys(g.search.Text)
+}
+
+func (g *GUI) showFileManager() {
+	// Create a new window for file management
+	window := g.app.NewWindow("File Manager")
+	window.Resize(fyne.NewSize(800, 600))
+
+	// Initialize the Files map if it's nil
+	if g.secretr.Store().Files == nil {
+		g.secretr.Store().ResetFiles()
+	}
+
+	// Track files for rendering
+	var fileNames []string
+	for fileName := range g.secretr.Store().Files {
+		fileNames = append(fileNames, fileName)
+	}
+
+	// Create a list to show files
+	fileList := widget.NewList(
+		func() int {
+			return len(fileNames)
+		},
+		func() fyne.CanvasObject {
+			return container.NewHBox(
+				widget.NewIcon(theme.FileIcon()),
+				widget.NewLabel("template"),
+				layout.NewSpacer(),
+				widget.NewButton("Download", nil),
+				widget.NewButton("Delete", nil),
+			)
+		},
+		func(id widget.ListItemID, obj fyne.CanvasObject) {
+			if id >= len(fileNames) {
+				return // Prevent index out of range error
+			}
+
+			box := obj.(*fyne.Container)
+			label := box.Objects[1].(*widget.Label)
+			downloadBtn := box.Objects[3].(*widget.Button)
+			deleteBtn := box.Objects[4].(*widget.Button)
+
+			fileName := fileNames[id]
+			label.SetText(fileName)
+
+			downloadBtn.OnTapped = func() {
+				g.downloadFile(fileName)
+			}
+
+			deleteBtn.OnTapped = func() {
+				g.deleteFile(fileName)
+			}
+		},
+	)
+
+	// Create upload button
+	uploadBtn := widget.NewButton("Upload File", func() {
+		fd := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+			if err != nil {
+				dialog.ShowError(err, window)
+				return
+			}
+			if reader == nil {
+				return
+			}
+			g.uploadFile(reader)
+		}, window)
+		fd.Show()
+	})
+
+	// Layout
+	content := container.NewBorder(
+		container.NewHBox(uploadBtn),
+		nil, nil, nil,
+		container.NewScroll(fileList),
+	)
+
+	window.SetContent(content)
+	window.Show()
+}
+
+func (g *GUI) uploadFile(reader fyne.URIReadCloser) {
+	// Make sure the Files map exists
+	if g.secretr.Store().Files == nil {
+		g.secretr.Store().ResetFiles()
+	}
+
+	// Try to lock the store
+	if g.secretr.IsProcessing() {
+		dialog.ShowInformation("Busy", "The system is currently processing another operation", g.mainWindow)
+		return
+	}
+
+	// Lock the store properly
+	if !g.secretr.LockStore() {
+		dialog.ShowInformation("Busy", "The system is currently processing another operation", g.mainWindow)
+		return
+	}
+	defer g.secretr.UnlockStore()
+
+	// Read file content
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		dialog.ShowError(err, g.mainWindow)
+		return
+	}
+	defer reader.Close()
+	fileName := reader.URI().Name()
+	err = g.secretr.StoreFileContent(fileName, int64(len(content)), content, []string{}, map[string]string{})
+	if err != nil {
+		dialog.ShowError(err, g.mainWindow)
+		return
+	}
+	dialog.ShowInformation("Success", "File uploaded successfully", g.mainWindow)
+	g.showFileManager()
+}
+
+func (g *GUI) downloadFile(fileName string) {
+	content, _, err := g.secretr.RetrieveFile(fileName)
+	if err != nil {
+		dialog.ShowError(err, g.mainWindow)
+		return
+	}
+	fd := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+		if err != nil {
+			dialog.ShowError(err, g.mainWindow)
+			return
+		}
+		if writer == nil {
+			return
+		}
+		_, err = writer.Write(content) // Note: In production, this should be decrypted
+		if err != nil {
+			dialog.ShowError(err, g.mainWindow)
+			return
+		}
+		writer.Close()
+		dialog.ShowInformation("Success", "File downloaded successfully", g.mainWindow)
+	}, g.mainWindow)
+	fd.SetFileName(fileName)
+	fd.Show()
+}
+
+func (g *GUI) deleteFile(fileName string) {
+	err := g.secretr.DeleteFile(fileName)
+	if err != nil {
+		dialog.ShowError(err, g.mainWindow)
+		return
+	}
+
+	dialog.ShowConfirm("Confirm Delete", "Are you sure you want to delete this file?", func(confirmed bool) {
+		if !confirmed {
+			return
+		}
+		err := g.secretr.DeleteFile(fileName)
+		if err != nil {
+			dialog.ShowError(err, g.mainWindow)
+			return
+		}
+
+		dialog.ShowInformation("Success", "File deleted successfully", g.mainWindow)
+
+		// Reopen the file manager to refresh the list
+		g.showFileManager()
+	}, g.mainWindow)
 }
 
 func (g *GUI) listSSHKeys() []string {
@@ -789,7 +960,6 @@ func (g *GUI) revealSSHKey() {
 	publicKeyEntry.Disable()
 	copyPrivateKeyButton := widget.NewButtonWithIcon("Copy Private Key", theme.ContentCopyIcon(), func() {
 		err := clipboard.WriteAll(privateKey)
-		fmt.Println(privateKey)
 		if err != nil {
 			panic(err)
 		}
@@ -826,7 +996,7 @@ func (g *GUI) revealSSHKey() {
 }
 
 func RunGUI() {
-	application := app.New()
+	application := app.NewWithID(wuid.New().String())
 	// Force light theme for dark text.
 	application.Settings().SetTheme(theme.LightTheme())
 	resource := fyne.NewStaticResource("secretr.png", defaultIcon)
