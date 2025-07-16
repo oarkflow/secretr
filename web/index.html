@@ -20,10 +20,24 @@
             <span class="font-bold text-xl">Secretr Vault</span>
         </div>
         <div>
-            <button id="logoutBtn" class="bg-indigo-500 hover:bg-indigo-600 px-3 py-1 rounded">Logout</button>
+            <button id="logoutBtn" class="bg-indigo-500 hover:bg-indigo-600 px-3 py-1 rounded hidden">Logout</button>
         </div>
     </header>
-    <main class="flex-1 flex flex-col items-center py-8">
+    <!-- Login Form -->
+    <main id="loginSection" class="flex-1 flex flex-col items-center justify-center py-8">
+        <div class="w-full max-w-sm bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-bold mb-4 text-center">Login to Secretr Vault</h2>
+            <form id="loginForm" class="flex flex-col gap-4">
+                <input type="text" id="loginUsername" placeholder="Username" class="border rounded px-2 py-1" required>
+                <input type="password" id="loginMasterKey" placeholder="MasterKey" class="border rounded px-2 py-1"
+                    required>
+                <button class="bg-indigo-500 text-white px-3 py-1 rounded hover:bg-indigo-600">Login</button>
+            </form>
+            <div id="loginError" class="text-red-500 mt-2 hidden"></div>
+        </div>
+    </main>
+    <!-- Main UI (hidden until login) -->
+    <main id="mainSection" class="flex-1 flex flex-col items-center py-8 hidden">
         <div class="w-full max-w-4xl bg-white rounded-lg shadow p-6">
             <div class="flex flex-wrap gap-4 mb-6">
                 <button class="tab-btn px-4 py-2 rounded bg-indigo-100 text-indigo-700 font-semibold"
@@ -112,16 +126,6 @@
         &copy; <span id="year"></span> Secretr Vault. All rights reserved.
     </footer>
     <script>
-        // --- UI Tab Logic ---
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
-                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('bg-indigo-500', 'text-white'));
-                document.getElementById('tab-' + btn.dataset.tab).classList.remove('hidden');
-                btn.classList.add('bg-indigo-500', 'text-white');
-            });
-        });
-
         // --- Notification ---
         function notify(msg, color = "green") {
             const n = document.getElementById('notification');
@@ -138,15 +142,67 @@
         function setToken(token) {
             localStorage.setItem('secretr_token', token);
         }
-        document.getElementById('saveToken').onclick = function (e) {
+
+        // --- Login Logic ---
+        document.getElementById('loginForm').onsubmit = async function (e) {
             e.preventDefault();
-            setToken(document.getElementById('apiToken').value);
-            notify('Token saved');
+            const username = document.getElementById('loginUsername').value;
+            const masterKey = document.getElementById('loginMasterKey').value;
+            document.getElementById('loginError').classList.add('hidden');
+            const res = await fetch('/secretr/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, masterKey })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setToken(data.token);
+                document.getElementById('loginSection').classList.add('hidden');
+                document.getElementById('mainSection').classList.remove('hidden');
+                document.getElementById('logoutBtn').classList.remove('hidden');
+                notify('Login successful');
+                // Load initial data
+                fetchSecrets();
+                fetchTenants();
+                fetchKeys();
+            } else {
+                document.getElementById('loginError').textContent = 'Login failed. Check credentials and MasterKey.';
+                document.getElementById('loginError').classList.remove('hidden');
+            }
         };
+
+        // --- Logout Logic ---
         document.getElementById('logoutBtn').onclick = function () {
             setToken('');
-            location.reload();
+            document.getElementById('mainSection').classList.add('hidden');
+            document.getElementById('loginSection').classList.remove('hidden');
+            document.getElementById('logoutBtn').classList.add('hidden');
         };
+
+        // --- Hide main UI if not logged in ---
+        if (!getToken()) {
+            document.getElementById('mainSection').classList.add('hidden');
+            document.getElementById('loginSection').classList.remove('hidden');
+            document.getElementById('logoutBtn').classList.add('hidden');
+        } else {
+            document.getElementById('mainSection').classList.remove('hidden');
+            document.getElementById('loginSection').classList.add('hidden');
+            document.getElementById('logoutBtn').classList.remove('hidden');
+            // Load initial data
+            fetchSecrets();
+            fetchTenants();
+            fetchKeys();
+        }
+
+        // --- UI Tab Logic ---
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('bg-indigo-500', 'text-white'));
+                document.getElementById('tab-' + btn.dataset.tab).classList.remove('hidden');
+                btn.classList.add('bg-indigo-500', 'text-white');
+            });
+        });
 
         // --- Secrets Tab Logic ---
         async function fetchSecrets() {

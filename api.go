@@ -2,6 +2,7 @@ package secretr
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/csv"
@@ -24,17 +25,24 @@ import (
 )
 
 var (
-	rateLimit = 10
-	limiter   = make(map[string]int)
-	limMu     sync.Mutex
-
-	userTokens = map[string]string{} // token -> username
-	userDBMu   sync.RWMutex
+	rateLimit       = 10
+	limiter         = make(map[string]int)
+	limMu           sync.Mutex
+	sessionTokens   = map[string]string{} // token -> username
+	sessionTokensMu sync.RWMutex
 )
 
-// UserStore is an interface for user data backends.
+// GenerateToken generates a random token string
+func GenerateToken() string {
+	b := make([]byte, 32)
+	_, _ = rand.Read(b)
+	return base64.URLEncoding.EncodeToString(b)
+}
+
+// UserStore defines methods to load and query users.
 type UserStore interface {
 	Load() error
+	HasUser(username string) bool
 	GetUserByToken(token string) (username string, ok bool)
 }
 
@@ -45,6 +53,7 @@ type CSVUserStore struct {
 	mu    sync.RWMutex
 }
 
+// Load reads users from a CSV file into memory.
 func (c *CSVUserStore) Load() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -54,6 +63,7 @@ func (c *CSVUserStore) Load() error {
 		return fmt.Errorf("failed to open file %s: %w", c.Path, err)
 	}
 	defer f.Close()
+
 	reader := csv.NewReader(f)
 	header, err := reader.Read()
 	if err != nil {
@@ -71,6 +81,7 @@ func (c *CSVUserStore) Load() error {
 	if usernameIndex == -1 || tokenIndex == -1 {
 		return fmt.Errorf("CSV header in %s must contain 'username' and 'token' columns", c.Path)
 	}
+
 	for {
 		record, err := reader.Read()
 		if err == io.EOF {
@@ -89,6 +100,20 @@ func (c *CSVUserStore) Load() error {
 	}
 	return nil
 }
+
+// HasUser checks whether the given username exists in the store.
+func (c *CSVUserStore) HasUser(username string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, u := range c.Users {
+		if u == username {
+			return true
+		}
+	}
+	return false
+}
+
+// GetUserByToken returns the username associated with the provided token.
 func (c *CSVUserStore) GetUserByToken(token string) (string, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -103,6 +128,7 @@ type JSONUserStore struct {
 	mu    sync.RWMutex
 }
 
+// Load reads users from a JSON file into memory.
 func (j *JSONUserStore) Load() error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -112,6 +138,7 @@ func (j *JSONUserStore) Load() error {
 		return fmt.Errorf("failed to open file %s: %w", j.Path, err)
 	}
 	defer f.Close()
+
 	dec := json.NewDecoder(f)
 	var users []struct {
 		Username string `json:"username"`
@@ -127,6 +154,20 @@ func (j *JSONUserStore) Load() error {
 	}
 	return nil
 }
+
+// HasUser checks whether the given username exists in the store.
+func (j *JSONUserStore) HasUser(username string) bool {
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	for _, u := range j.Users {
+		if u == username {
+			return true
+		}
+	}
+	return false
+}
+
+// GetUserByToken returns the username associated with the provided token.
 func (j *JSONUserStore) GetUserByToken(token string) (string, bool) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
@@ -142,16 +183,18 @@ type SQLXUserStore struct {
 	mu    sync.RWMutex
 }
 
+// Load reads users from the SQL table into memory.
 func (s *SQLXUserStore) Load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Users = make(map[string]string)
-	// Import _ "github.com/mattn/go-sqlite3" or other driver as needed.
+
 	db, err := sqlx.Open("sqlite3", s.DSN)
 	if err != nil {
 		return fmt.Errorf("failed to open db: %w", err)
 	}
 	defer db.Close()
+
 	type row struct {
 		Username string `db:"username"`
 		Token    string `db:"token"`
@@ -168,6 +211,20 @@ func (s *SQLXUserStore) Load() error {
 	}
 	return nil
 }
+
+// HasUser checks whether the given username exists in the store.
+func (s *SQLXUserStore) HasUser(username string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, u := range s.Users {
+		if u == username {
+			return true
+		}
+	}
+	return false
+}
+
+// GetUserByToken returns the username associated with the provided token.
 func (s *SQLXUserStore) GetUserByToken(token string) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -205,75 +262,6 @@ func LoadUserDB(path string) error {
 		userStore = &CSVUserStore{Path: path}
 	}
 	return userStore.Load()
-}
-
-// Load users from CSV file: username,token
-func loadUserDB(path string) error {
-	userDBMu.Lock()
-	defer userDBMu.Unlock()
-
-	userTokens = make(map[string]string) // Initialize the map
-
-	f, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("failed to open file %s: %w", path, err)
-	}
-	defer f.Close()
-
-	reader := csv.NewReader(f)
-
-	// Read the header row
-	header, err := reader.Read()
-	if err != nil {
-		if err == io.EOF {
-			return fmt.Errorf("CSV file %s is empty", path)
-		}
-		return fmt.Errorf("failed to read CSV header from %s: %w", path, err)
-	}
-
-	// Find the indices of "username" and "token"
-	usernameIndex := -1
-	tokenIndex := -1
-	for i, col := range header {
-		trimmedCol := strings.TrimSpace(col)
-		if trimmedCol == "username" {
-			usernameIndex = i
-		} else if trimmedCol == "token" {
-			tokenIndex = i
-		}
-	}
-
-	if usernameIndex == -1 || tokenIndex == -1 {
-		return fmt.Errorf("CSV header in %s must contain 'username' and 'token' columns", path)
-	}
-
-	// Read the remaining rows
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break // End of file
-		}
-		if err != nil {
-			return fmt.Errorf("failed to read CSV record from %s: %w", path, err)
-		}
-
-		// Ensure the record has enough columns before accessing
-		if len(record) > usernameIndex && len(record) > tokenIndex {
-			username := strings.TrimSpace(record[usernameIndex])
-			token := strings.TrimSpace(record[tokenIndex])
-
-			if username != "" && token != "" {
-				userTokens[token] = username
-			}
-		} else {
-			// Optionally log or handle malformed rows more specifically
-			fmt.Printf("Warning: Skipping malformed row in %s: %v\n", path, record)
-		}
-	}
-
-	fmt.Printf("Successfully loaded user data from %s. Total entries: %d\n", path, len(userTokens))
-	// fmt.Println(userTokens) // Uncomment for debugging to see the map content
-	return nil
 }
 
 // authMiddleware validates the Bearer token provided in the Authorization header.
@@ -584,9 +572,13 @@ func userAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		token := strings.TrimPrefix(auth, "Bearer ")
-		userDBMu.RLock()
-		user, ok := userTokens[token]
-		userDBMu.RUnlock()
+		// Check sessionTokens first
+		sessionTokensMu.RLock()
+		user, ok := sessionTokens[token]
+		sessionTokensMu.RUnlock()
+		if !ok {
+			user, ok = userStore.GetUserByToken(token)
+		}
 		if !ok {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -875,12 +867,48 @@ func initKVSecretVersionsEndpoint(mux *http.ServeMux, v *Secretr) {
 	}))))
 }
 
+// --- User Authentication Endpoints ---
+func initAuthEndpoints(mux *http.ServeMux, v *Secretr) {
+	mux.HandleFunc("/secretr/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Username  string `json:"username"`
+			MasterKey string `json:"masterKey"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request", http.StatusBadRequest)
+			return
+		}
+		// Validate user from userStore
+		userStore.Load()
+		if !userStore.HasUser(req.Username) {
+			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			return
+		}
+		// Try to open vault with provided MasterKey
+		os.Setenv("SECRETR_MASTERKEY", req.MasterKey)
+		if err := v.PromptMaster(); err != nil {
+			http.Error(w, "Vault error: "+err.Error(), http.StatusUnauthorized)
+			return
+		}
+		token := GenerateToken()
+		sessionTokensMu.Lock()
+		sessionTokens[token] = req.Username
+		sessionTokensMu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]string{"token": token})
+	})
+}
+
 func StartSecureHTTPServer(v *Secretr, addr string) {
 	mux := http.NewServeMux()
 	initTransitEndpoints(mux, v)
 	initTenantEndpoints(mux)
 	initManagedKeysEndpoints(mux, v)
 	initKVSecretVersionsEndpoint(mux, v)
+	initAuthEndpoints(mux, v) // <-- Add this line
 	fileHandler := NewFileHandler(v)
 	fileHandler.RegisterFileRoutes(mux)
 
@@ -921,8 +949,10 @@ func StartSecureHTTPServer(v *Secretr, addr string) {
 					fmt.Println("Stopping periodic task.")
 					return
 				case <-ticker.C:
-					if err := v.Load(); err != nil {
-						log.Fatalf("Failed to load Secretr: %v", err)
+					if v.cipherGCM != nil {
+						if err := v.Load(); err != nil {
+							log.Fatalf("Failed to load Secretr: %v", err)
+						}
 					}
 				}
 			}
