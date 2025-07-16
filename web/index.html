@@ -38,7 +38,7 @@
     </main>
     <!-- Main UI (hidden until login) -->
     <main id="mainSection" class="flex-1 flex flex-col items-center py-8 hidden">
-        <div class="w-full max-w-4xl bg-white rounded-lg shadow p-6">
+        <div class="w-full max-w-7xl bg-white rounded-lg shadow p-6">
             <div class="flex flex-wrap gap-4 mb-6">
                 <button class="tab-btn px-4 py-2 rounded bg-indigo-100 text-indigo-700 font-semibold"
                     data-tab="secrets">Secrets</button>
@@ -48,6 +48,8 @@
                     data-tab="keys">Keys</button>
                 <button class="tab-btn px-4 py-2 rounded bg-indigo-100 text-indigo-700 font-semibold"
                     data-tab="settings">Settings</button>
+                <button class="tab-btn px-4 py-2 rounded bg-indigo-100 text-indigo-700 font-semibold"
+                    data-tab="files">Files</button>
             </div>
             <!-- Secrets Tab -->
             <section id="tab-secrets" class="tab-content">
@@ -118,6 +120,21 @@
                         class="mt-2 bg-indigo-500 text-white px-3 py-1 rounded hover:bg-indigo-600">Save</button>
                 </div>
             </section>
+            <!-- Files Tab -->
+            <section id="tab-files" class="tab-content hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold">Files</h2>
+                    <button id="refreshFiles"
+                        class="bg-indigo-500 text-white px-3 py-1 rounded hover:bg-indigo-600">Refresh</button>
+                </div>
+                <form id="uploadFileForm" class="flex gap-2 mb-4" enctype="multipart/form-data">
+                    <input type="file" id="fileInput" class="border rounded px-2 py-1 flex-1" required>
+                    <input type="text" id="fileTags" placeholder="Tags (comma separated)"
+                        class="border rounded px-2 py-1 flex-1">
+                    <button class="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600">Upload</button>
+                </form>
+                <div id="filesList" class="overflow-x-auto"></div>
+            </section>
             <div id="notification"
                 class="fixed bottom-4 right-4 bg-green-500 text-white px-4 py-2 rounded shadow hidden"></div>
         </div>
@@ -165,6 +182,7 @@
                 fetchSecrets();
                 fetchTenants();
                 fetchKeys();
+                fetchFiles();
             } else {
                 document.getElementById('loginError').textContent = 'Login failed. Check credentials and MasterKey.';
                 document.getElementById('loginError').classList.remove('hidden');
@@ -192,6 +210,7 @@
             fetchSecrets();
             fetchTenants();
             fetchKeys();
+            fetchFiles();
         }
 
         // --- UI Tab Logic ---
@@ -422,6 +441,84 @@
         }
 
         fetchKeys();
+
+        // --- Files Tab Logic ---
+        async function fetchFiles() {
+            const res = await fetch('/secretr/files', { headers: { Authorization: 'Bearer ' + getToken() } });
+            if (!res.ok) return notify('Failed to fetch files', 'red');
+            const resp = await res.json();
+            const files = resp.data || [];
+            let html = `<table class="min-w-full text-sm"><thead><tr><th>Name</th><th>Size</th><th>Type</th><th>Created</th><th>Actions</th></tr></thead><tbody>`;
+            for (const f of files) {
+                html += `<tr>
+                <td>${f.fileName}</td>
+                <td>${f.size}</td>
+                <td>${f.contentType}</td>
+                <td>${f.createdAt ? new Date(f.createdAt).toLocaleString() : ''}</td>
+                <td>
+                    <button onclick="downloadFile('${f.fileName}')" class="text-blue-600 hover:underline">Download</button>
+                    <button onclick="deleteFile('${f.fileName}')" class="text-red-600 hover:underline ml-2">Delete</button>
+                    ${f.contentType.startsWith('image/') ? `<button onclick="renderImage('${f.fileName}')" class="text-green-600 hover:underline ml-2">View</button>` : ''}
+                </td>
+            </tr>`;
+            }
+            html += `</tbody></table>`;
+            document.getElementById('filesList').innerHTML = html;
+        }
+        async function downloadFile(name) {
+            const res = await fetch('/secretr/files/' + encodeURIComponent(name), {
+                headers: { Authorization: 'Bearer ' + getToken() }
+            });
+            if (!res.ok) return notify('Download failed', 'red');
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+        }
+        async function deleteFile(name) {
+            if (!confirm('Delete file ' + name + '?')) return;
+            const res = await fetch('/secretr/files/' + encodeURIComponent(name), {
+                method: 'DELETE',
+                headers: { Authorization: 'Bearer ' + getToken() }
+            });
+            if (res.ok) {
+                notify('File deleted');
+                fetchFiles();
+            } else {
+                notify('Delete failed', 'red');
+            }
+        }
+        async function renderImage(name) {
+            const url = '/secretr/files/render/' + encodeURIComponent(name);
+            window.open(url, '_blank');
+        }
+        document.getElementById('uploadFileForm').onsubmit = async function (e) {
+            e.preventDefault();
+            const fileInput = document.getElementById('fileInput');
+            if (!fileInput.files.length) return notify('No file selected', 'red');
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('tags', document.getElementById('fileTags').value);
+            const res = await fetch('/secretr/files', {
+                method: 'POST',
+                headers: { Authorization: 'Bearer ' + getToken() },
+                body: formData
+            });
+            if (res.ok) {
+                notify('File uploaded');
+                fetchFiles();
+                this.reset();
+            } else {
+                notify('Upload failed', 'red');
+            }
+        };
+        document.getElementById('refreshFiles').onclick = fetchFiles;
+        fetchFiles();
 
         // --- Settings Tab ---
         document.getElementById('year').textContent = new Date().getFullYear();

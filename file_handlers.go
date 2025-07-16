@@ -62,25 +62,24 @@ func (h *FileHandler) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	// Read the content of the file into memory
+	content, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Failed to read file", http.StatusInternalServerError)
+		return
+	}
+
 	// Get tags and properties from form
 	tags := strings.Split(r.FormValue("tags"), ",")
 	properties := make(map[string]string)
 	for k, v := range r.Form {
-		if strings.HasPrefix(k, "prop_") {
+		if strings.HasPrefix(k, "prop_") && len(v) > 0 {
 			properties[strings.TrimPrefix(k, "prop_")] = v[0]
 		}
 	}
 
-	// Create temporary file
-	tempFile, err := createTempFile(file)
-	if err != nil {
-		http.Error(w, "Failed to process file", http.StatusInternalServerError)
-		return
-	}
-	defer os.Remove(tempFile)
-
-	// Store file in vault
-	err = h.secretr.StoreFile(tempFile, tags, properties)
+	// Store file content in vault
+	err = h.secretr.StoreFileContent(header.Filename, int64(len(content)), content, tags, properties)
 	if err != nil {
 		http.Error(w, "Failed to store file", http.StatusInternalServerError)
 		return

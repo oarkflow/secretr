@@ -72,9 +72,10 @@ func (c *CSVUserStore) Load() error {
 	usernameIndex, tokenIndex := -1, -1
 	for i, col := range header {
 		trimmedCol := strings.TrimSpace(col)
-		if trimmedCol == "username" {
+		switch trimmedCol {
+		case "username":
 			usernameIndex = i
-		} else if trimmedCol == "token" {
+		case "token":
 			tokenIndex = i
 		}
 	}
